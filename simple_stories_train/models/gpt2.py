@@ -135,18 +135,9 @@ class GPT2(nn.Module):
 
         self.wte: nn.Embedding = nn.Embedding(config.vocab_size, config.n_embd)
         self.wpe: nn.Embedding = nn.Embedding(config.block_size, config.n_embd)
-        _blocks: list[Block] = [Block(config) for _ in range(config.n_layer)]
-        self.h_torch: nn.ModuleList = nn.ModuleList(_blocks)
-        self.h: list[Block] = _blocks
+        self.h: list[Block] = [Block(config) for _ in range(config.n_layer)]
+        self.h_torch: nn.ModuleList = nn.ModuleList(self.h)
         self.ln_f: nn.LayerNorm = nn.LayerNorm(config.n_embd)
-        self.transformer: nn.ModuleDict = nn.ModuleDict(
-            {
-                "wte": self.wte,
-                "wpe": self.wpe,
-                "h": self.h_torch,
-                "ln_f": self.ln_f,
-            }
-        )
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
         self.lm_head.LLMC_SKIP_INIT = True  # type: ignore
         self.wte.weight = self.lm_head.weight  # type: ignore[reportAttributeAccessIssue]
