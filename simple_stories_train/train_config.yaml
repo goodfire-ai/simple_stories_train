@@ -1,8 +1,8 @@
-# wandb_project: spd
+wandb_project: spd-play
 train_dataset_config:
   name: SimpleStories/SimpleStories
   is_tokenized: false
-  tokenizer_file_path: tokenizer/simplestories-tokenizer.json
+  tokenizer_file_path: simple_stories_train/tokenizer/simplestories-tokenizer.json
   split: train
   streaming: false
   n_ctx: 512
@@ -11,18 +11,19 @@ train_dataset_config:
 val_dataset_config:
   name: SimpleStories/SimpleStories
   is_tokenized: false
-  tokenizer_file_path: tokenizer/simplestories-tokenizer.json
+  tokenizer_file_path: simple_stories_train/tokenizer/simplestories-tokenizer.json
   split: test
   streaming: false
   n_ctx: 512
   seed: 0
   column_name: story
 # model_id: llama-1.25M
-model_id: gpt2-1.25M
+model_id: gpt2_simple-1.25M
 # 1 GPU
 batch_size: 64
 total_batch_size: 32768 # 64 * 512
-num_iterations: 60000 # custom iterations, reload the train loader if we exhaust data
+# num_iterations: 200_000 # custom iterations, reload the train loader if we exhaust data
+num_iterations: 9000 # custom iterations, reload the train loader if we exhaust data
 warmup_iters: 600
 # # 4 GPUs
 # batch_size: 64
@@ -37,3 +38,16 @@ val_loss_every: 100
 val_max_steps: 20
 sample_every: 1000
 intermediate_checkpoints: false
+
+# from_pretrained: null
+from_pretrained: "wandb:goodfire/spd-play/runs/c1ts34rh"
+# enable_ln_ablation: false
+# ln_stats_path: null
+# n_steps_between_ln_ablation: 1000
+# ln_ablation_start_step: 1
+# ln_ablation_max_to_remove: null
+enable_ln_ablation: true
+ln_stats_path: out/gpt2_simple-1.25M-stats-c1ts34rh.yaml # 100k steps
+n_steps_between_ln_ablation: 500
+ln_ablation_start_step: 1
+ln_ablation_max_to_remove: null

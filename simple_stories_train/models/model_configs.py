@@ -1,4 +1,5 @@
 from simple_stories_train.models.gpt2 import GPT2Config
+from simple_stories_train.models.gpt2_simple import GPT2SimpleConfig
 from simple_stories_train.models.llama import LlamaConfig
 
 MODEL_CONFIGS = {
@@ -116,6 +117,14 @@ MODEL_CONFIGS = {
     ),
     # GPT-2 presets
     "gpt2-1.25M": GPT2Config(
+        block_size=512,
+        vocab_size=4019,
+        n_layer=4,
+        n_head=4,
+        n_embd=128,
+        flash_attention=True,
+    ),
+    "gpt2_simple-1.25M": GPT2SimpleConfig(
         block_size=512,
         vocab_size=4019,
         n_layer=4,

@@ -1,7 +1,6 @@
 import inspect
 import math
 from pathlib import Path
-from typing import Any, Literal
 
 import torch
 import torch.nn as nn
@@ -10,8 +9,6 @@ from pydantic import BaseModel, ConfigDict
 from torch import Tensor
 from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch.nn import functional as F
-from transformers import GPT2Config as HFGPT2Config
-from transformers import GPT2LMHeadModel
 
 from simple_stories_train.run_info import RunInfo
 from simple_stories_train.utils import print0
@@ -19,7 +16,7 @@ from simple_stories_train.utils import print0
 # pyright: reportAttributeAccessIssue=false, reportIndexIssue=false
 
 
-class GPT2Config(BaseModel):
+class GPT2SimpleConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     block_size: int = 1024
     vocab_size: int = 50257
@@ -66,14 +63,17 @@ class LayerNorm(nn.Module):
 class CausalSelfAttention(nn.Module):
     bias: Tensor
 
-    def __init__(self, config: GPT2Config):
+    def __init__(self, config: GPT2SimpleConfig):
         super().__init__()
         assert config.n_embd % config.n_head == 0
         self.n_head = config.n_head
         self.n_embd = config.n_embd
         self.flash_attention = config.flash_attention
         # key, query, value projections for all heads, but in a batch
-        self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd)
+        # self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd)
+        self.q_proj = nn.Linear(config.n_embd, config.n_embd)
+        self.k_proj = nn.Linear(config.n_embd, config.n_embd)
+        self.v_proj = nn.Linear(config.n_embd, config.n_embd)
         # output projection
         self.c_proj = nn.Linear(config.n_embd, config.n_embd)
         self.c_proj.LLMC_RESIDUAL_SCALE_FLAG = True  # type: ignore
@@ -91,10 +91,9 @@ class CausalSelfAttention(nn.Module):
         x: Float[Tensor, "batch pos d_model"],
     ) -> Float[Tensor, "batch pos d_model"]:
         B, T, C = x.size()
-        # calculate q, k, v for all heads in batch
-        # move head dimension forward to be the batch dimension
-        qkv = self.c_attn(x)
-        q, k, v = qkv.split(self.n_embd, dim=2)
+        q = self.q_proj(x)
+        k = self.k_proj(x)
+        v = self.v_proj(x)
         k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
         q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
         v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
@@ -121,7 +120,7 @@ class CausalSelfAttention(nn.Module):
 
 
 class MLP(nn.Module):
-    def __init__(self, config: GPT2Config):
+    def __init__(self, config: GPT2SimpleConfig):
         super().__init__()
         self.c_fc = nn.Linear(config.n_embd, 4 * config.n_embd)
         self.gelu = NewGELU()
@@ -136,7 +135,7 @@ class MLP(nn.Module):
 
 
 class Block(nn.Module):
-    def __init__(self, config: GPT2Config):
+    def __init__(self, config: GPT2SimpleConfig):
         super().__init__()
         self.ln_1 = LayerNorm(config.n_embd, eps=1e-5)
         self.attn = CausalSelfAttention(config)
@@ -152,8 +151,8 @@ class Block(nn.Module):
         return x
 
 
-class GPT2(nn.Module):
-    def __init__(self, config: GPT2Config):
+class GPT2Simple(nn.Module):
+    def __init__(self, config: GPT2SimpleConfig):
         super().__init__()
         self.config = config
 
@@ -205,7 +204,7 @@ class GPT2(nn.Module):
         pos_emb = self.wpe(pos)  # (t, n_embd)
         x = tok_emb + pos_emb
 
-        for block in self.h:
+        for block in self._h:
             x = block(x)
         x = self.ln_f(x)
 
@@ -229,15 +228,15 @@ class GPT2(nn.Module):
         return out_logits, loss
 
     @classmethod
-    def from_run_info(cls, run_info: RunInfo) -> "GPT2":
+    def from_run_info(cls, run_info: RunInfo) -> "GPT2Simple":
         """Create a GPT-2 model from a RunInfo, loading weights from its checkpoint."""
-        model = cls(GPT2Config(**run_info.model_config_dict))
+        model = cls(GPT2SimpleConfig(**run_info.model_config_dict))
         state_dict = torch.load(run_info.checkpoint_path, map_location="cpu")
         model.load_state_dict(state_dict, strict=True)
         return model
 
     @classmethod
-    def from_pretrained(cls, model_path: str | Path) -> "GPT2":
+    def from_pretrained(cls, model_path: str | Path) -> "GPT2Simple":
         """Create a GPT-2 model from a wandb string or a local path.
 
         Args:
@@ -350,115 +349,3 @@ class GPT2(nn.Module):
             idx = idx.squeeze(0)
 
         return idx
-
-
-def _build_mapping(
-    direction: Literal["custom_to_hf", "hf_to_custom"], n_layer: int
-) -> list[tuple[str, str, bool]]:
-    base_pairs: list[tuple[str, str, bool]] = [
-        ("wte.weight", "transformer.wte.weight", False),
-        ("wpe.weight", "transformer.wpe.weight", False),
-        ("ln_f.weight", "transformer.ln_f.weight", False),
-        ("ln_f.bias", "transformer.ln_f.bias", False),
-        ("lm_head.weight", "lm_head.weight", False),
-    ]
-
-    layer_pairs: list[tuple[str, str, bool]] = []
-    for i in range(n_layer):
-        c_prefix = f"h.{i}."
-        h_prefix = f"transformer.h.{i}."
-        layer_pairs.extend(
-            [
-                (f"{c_prefix}ln_1.weight", f"{h_prefix}ln_1.weight", False),
-                (f"{c_prefix}ln_1.bias", f"{h_prefix}ln_1.bias", False),
-                (f"{c_prefix}ln_2.weight", f"{h_prefix}ln_2.weight", False),
-                (f"{c_prefix}ln_2.bias", f"{h_prefix}ln_2.bias", False),
-                (f"{c_prefix}attn.c_attn.weight", f"{h_prefix}attn.c_attn.weight", True),
-                (f"{c_prefix}attn.c_attn.bias", f"{h_prefix}attn.c_attn.bias", False),
-                (f"{c_prefix}attn.c_proj.weight", f"{h_prefix}attn.c_proj.weight", True),
-                (f"{c_prefix}attn.c_proj.bias", f"{h_prefix}attn.c_proj.bias", False),
-                (f"{c_prefix}mlp.c_fc.weight", f"{h_prefix}mlp.c_fc.weight", True),
-                (f"{c_prefix}mlp.c_fc.bias", f"{h_prefix}mlp.c_fc.bias", False),
-                (f"{c_prefix}mlp.c_proj.weight", f"{h_prefix}mlp.c_proj.weight", True),
-                (f"{c_prefix}mlp.c_proj.bias", f"{h_prefix}mlp.c_proj.bias", False),
-            ]
-        )
-
-    mapping = base_pairs + layer_pairs
-    if direction == "custom_to_hf":
-        return mapping
-    return [(dst, src, transpose) for (src, dst, transpose) in mapping]
-
-
-def _resolve_tensor(module: nn.Module, path: str) -> Tensor:
-    """Get tensor from module by path.
-
-    E.g. _resolve_tensor(module, "transformer.h.0.attn.c_attn.weight")
-    will return the weight tensor for the first attention layer.
-    """
-
-    obj: Any = module
-    for part in path.split("."):
-        obj = obj[int(part)] if part.isdigit() else getattr(obj, part)
-    assert isinstance(obj, Tensor)
-    return obj
-
-
-@torch.inference_mode()
-def _copy_by_mapping(src: nn.Module, dst: nn.Module, mapping: list[tuple[str, str, bool]]) -> None:
-    for src_path, dst_path, transpose in mapping:
-        src_tensor = _resolve_tensor(src, src_path)
-        dst_tensor = _resolve_tensor(dst, dst_path)
-        tensor_to_copy = src_tensor.t().contiguous() if transpose else src_tensor
-        dst_tensor.copy_(tensor_to_copy)
-
-
-def convert_hf_gpt2_to_gpt2(hf_model: GPT2LMHeadModel) -> GPT2:
-    """Convert a HuggingFace GPT2LMHeadModel to our custom GPT2.
-
-    Args:
-        hf_model: HuggingFace GPT2LMHeadModel instance
-
-    Returns:
-        Our custom GPT2 model with weights copied from the HF model
-    """
-    custom_config = GPT2Config(
-        block_size=hf_model.config.n_ctx,
-        vocab_size=hf_model.config.vocab_size,
-        n_layer=hf_model.config.n_layer,
-        n_head=hf_model.config.n_head,
-        n_embd=hf_model.config.n_embd,
-        flash_attention=True,
-    )
-    custom_model = GPT2(custom_config)
-    mapping = _build_mapping("hf_to_custom", custom_model.config.n_layer)
-    _copy_by_mapping(src=hf_model, dst=custom_model, mapping=mapping)
-    return custom_model
-
-
-def convert_gpt2_to_hf_gpt2(custom_model: GPT2) -> GPT2LMHeadModel:
-    """Convert custom GPT-2 model to HuggingFace GPT2LMHeadModel.
-
-    Args:
-        custom_model: The custom GPT-2 model to convert
-
-    Returns:
-        The converted HuggingFace GPT2LMHeadModel
-    """
-    hf_config = HFGPT2Config(
-        vocab_size=custom_model.config.vocab_size,
-        n_positions=custom_model.config.block_size,
-        n_ctx=custom_model.config.block_size,
-        n_layer=custom_model.config.n_layer,
-        n_head=custom_model.config.n_head,
-        n_embd=custom_model.config.n_embd,
-        activation_function="gelu_new",
-        n_inner=None,
-        layer_norm_epsilon=1e-5,
-        tie_word_embeddings=True,
-    )
-    hf_model = GPT2LMHeadModel(hf_config)
-    mapping = _build_mapping("custom_to_hf", custom_model.config.n_layer)
-    _copy_by_mapping(src=custom_model, dst=hf_model, mapping=mapping)
-    hf_model.eval()
-    return hf_model
