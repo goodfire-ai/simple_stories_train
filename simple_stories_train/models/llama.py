@@ -357,7 +357,7 @@ class Llama(nn.Module):
     def from_run_info(cls, run_info: RunInfo) -> "Llama":
         """Create a Llama model from a RunInfo, loading weights from its checkpoint."""
         model = cls(LlamaConfig(**run_info.model_config_dict))
-        state_dict = torch.load(run_info.checkpoint_path, map_location="cpu")
+        state_dict = torch.load(run_info.checkpoint_path, map_location="cpu", weights_only=True)
         model.load_state_dict(state_dict, strict=True)
         return model
 
