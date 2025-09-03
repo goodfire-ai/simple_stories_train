@@ -1,11 +1,10 @@
 import inspect
 import math
-from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import torch
 import torch.nn as nn
-from jaxtyping import Float, Int
+from jaxtyping import Float
 from pydantic import BaseModel, ConfigDict
 from torch import Tensor
 from torch.distributed.optim import ZeroRedundancyOptimizer
@@ -13,7 +12,6 @@ from torch.nn import functional as F
 from transformers import GPT2Config as HFGPT2Config
 from transformers import GPT2LMHeadModel
 
-from simple_stories_train.run_info import RunInfo
 from simple_stories_train.utils import print0
 
 # pyright: reportAttributeAccessIssue=false, reportIndexIssue=false
@@ -39,28 +37,6 @@ class NewGELU(nn.Module):
                 + torch.tanh(math.sqrt(2.0 / math.pi) * (input + 0.044715 * torch.pow(input, 3.0)))
             )
         )
-
-
-class LayerNorm(nn.Module):
-    def __init__(self, n_embd: int, eps: float):
-        super().__init__()
-        self.eps = eps
-        self.weight = nn.Parameter(torch.ones(n_embd))
-        self.bias = nn.Parameter(torch.zeros(n_embd))
-        # Use pre-stored stds instead of computing them on the fly
-        self.std: float | None = None
-
-    def forward(
-        self, residual: Float[Tensor, "batch posn d_model"]
-    ) -> Float[Tensor, "batch posn d_model"]:
-        residual_mean = residual.mean(dim=-1, keepdim=True)
-        if self.std is None:
-            residual_std = (residual.var(dim=-1, keepdim=True, unbiased=False) + self.eps).sqrt()
-        else:
-            residual_std = self.std
-
-        residual = (residual - residual_mean) / residual_std
-        return residual * self.weight + self.bias
 
 
 class CausalSelfAttention(nn.Module):
@@ -138,9 +114,9 @@ class MLP(nn.Module):
 class Block(nn.Module):
     def __init__(self, config: GPT2Config):
         super().__init__()
-        self.ln_1 = LayerNorm(config.n_embd, eps=1e-5)
+        self.ln_1 = nn.LayerNorm(config.n_embd)
         self.attn = CausalSelfAttention(config)
-        self.ln_2 = LayerNorm(config.n_embd, eps=1e-5)
+        self.ln_2 = nn.LayerNorm(config.n_embd)
         self.mlp = MLP(config)
 
     def forward(
@@ -159,9 +135,9 @@ class GPT2(nn.Module):
 
         self.wte: nn.Embedding = nn.Embedding(config.vocab_size, config.n_embd)
         self.wpe: nn.Embedding = nn.Embedding(config.block_size, config.n_embd)
-        self._h: list[Block] = [Block(config) for _ in range(config.n_layer)]
-        self.h: nn.ModuleList = nn.ModuleList(self._h)
-        self.ln_f: LayerNorm = LayerNorm(config.n_embd, eps=1e-5)
+        self.h: list[Block] = [Block(config) for _ in range(config.n_layer)]
+        self.h_torch: nn.ModuleList = nn.ModuleList(self.h)
+        self.ln_f: nn.LayerNorm = nn.LayerNorm(config.n_embd)
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
         self.lm_head.LLMC_SKIP_INIT = True  # type: ignore
         self.wte.weight = self.lm_head.weight  # type: ignore[reportAttributeAccessIssue]
@@ -187,8 +163,8 @@ class GPT2(nn.Module):
 
     def forward(
         self,
-        idx: Int[Tensor, "batch pos"],
-        targets: Int[Tensor, "batch pos"] | None = None,
+        idx: Float[Tensor, "batch pos"],
+        targets: Float[Tensor, "batch pos vocab"] | None = None,
         return_logits: bool = True,
     ) -> tuple[
         Float[Tensor, "batch pos vocab"] | None,
@@ -212,8 +188,6 @@ class GPT2(nn.Module):
         logits: Tensor = self.lm_head(x)
         loss: Tensor | None
         if targets is not None:
-            if targets.dtype != torch.long:
-                targets = targets.to(torch.long)
             loss = F.cross_entropy(
                 logits.view(-1, logits.size(-1)),
                 targets.view(-1),
@@ -229,24 +203,53 @@ class GPT2(nn.Module):
         return out_logits, loss
 
     @classmethod
-    def from_run_info(cls, run_info: RunInfo) -> "GPT2":
-        """Create a GPT-2 model from a RunInfo, loading weights from its checkpoint."""
-        model = cls(GPT2Config(**run_info.model_config_dict))
-        state_dict = torch.load(run_info.checkpoint_path, map_location="cpu", weights_only=True)
-        model.load_state_dict(state_dict, strict=True)
+    def from_pretrained(cls, model_type: str) -> "GPT2":
+        """Loads pretrained GPT-2 model weights from Hugging Face."""
+        assert model_type in {"gpt2", "gpt2-medium", "gpt2-large", "gpt2-xl"}
+        from transformers import GPT2LMHeadModel  # type: ignore
+
+        print0(f"loading weights from pretrained gpt: {model_type}")
+        config_args = {
+            "gpt2": dict(n_layer=12, n_head=12, n_embd=768),
+            "gpt2-medium": dict(n_layer=24, n_head=16, n_embd=1024),
+            "gpt2-large": dict(n_layer=36, n_head=20, n_embd=1280),
+            "gpt2-xl": dict(n_layer=48, n_head=25, n_embd=1600),
+        }[model_type]
+        config_args["vocab_size"] = 50257
+        config_args["block_size"] = 1024
+        config = GPT2Config(**cast(dict[str, Any], config_args))
+        model = GPT2(config)
+
+        sd = model.state_dict()
+        sd_keys = [k for k in sd if not k.endswith(".attn.bias")]  # discard this mask / buffer
+
+        model_hf = GPT2LMHeadModel.from_pretrained(model_type)
+        sd_hf = model_hf.state_dict()
+        sd_keys_hf = [
+            k for k in sd_hf if not (k.endswith(".attn.masked_bias") or k.endswith(".attn.bias"))
+        ]
+        transposed = [
+            "attn.c_attn.weight",
+            "attn.c_proj.weight",
+            "mlp.c_fc.weight",
+            "mlp.c_proj.weight",
+        ]
+        # openai checkpoints use a "Conv1D" module; we use a vanilla Linear
+        # this means that we have to transpose these weights when we import them
+        assert len(sd_keys_hf) == len(sd_keys), (
+            f"mismatched keys: {len(sd_keys_hf)} != {len(sd_keys)}"
+        )
+        for k in sd_keys_hf:
+            if any(k.endswith(w) for w in transposed):
+                assert sd_hf[k].shape[::-1] == sd[k].shape
+                with torch.no_grad():
+                    sd[k].copy_(sd_hf[k].t())
+            else:
+                assert sd_hf[k].shape == sd[k].shape
+                with torch.no_grad():
+                    sd[k].copy_(sd_hf[k])
+
         return model
-
-    @classmethod
-    def from_pretrained(cls, model_path: str | Path) -> "GPT2":
-        """Create a GPT-2 model from a wandb string or a local path.
-
-        Args:
-            model_path:
-                - W&B strings: 'wandb:goodfire/spd-play/runs/152i5k4r'
-                - Local: path to a .pt checkpoint file
-        """
-        run_info = RunInfo.from_path(model_path)
-        return cls.from_run_info(run_info)
 
     def configure_optimizers(
         self,
@@ -365,7 +368,7 @@ def _build_mapping(
 
     layer_pairs: list[tuple[str, str, bool]] = []
     for i in range(n_layer):
-        c_prefix = f"h.{i}."
+        c_prefix = f"h_torch.{i}."
         h_prefix = f"transformer.h.{i}."
         layer_pairs.extend(
             [

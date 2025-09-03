@@ -1,4 +1,4 @@
-wandb_project: spd-play
+wandb_project: spd
 train_dataset_config:
   name: SimpleStories/SimpleStories
   is_tokenized: false
@@ -39,15 +39,10 @@ val_max_steps: 20
 sample_every: 1000
 intermediate_checkpoints: false
 
-# from_pretrained: null
-from_pretrained: "wandb:goodfire/spd-play/runs/c1ts34rh"
-# enable_ln_ablation: false
-# ln_stats_path: null
-# n_steps_between_ln_ablation: 1000
+# # from_pretrained: null
+# from_pretrained: "wandb:goodfire/spd-play/runs/c1ts34rh"
+# enable_ln_ablation: true
+# ln_stats_path: out/gpt2_simple-1.25M-stats-c1ts34rh.yaml # 100k steps
+# n_steps_between_ln_ablation: 500
 # ln_ablation_start_step: 1
 # ln_ablation_max_to_remove: null
-enable_ln_ablation: true
-ln_stats_path: out/gpt2_simple-1.25M-stats-c1ts34rh.yaml # 100k steps
-n_steps_between_ln_ablation: 500
-ln_ablation_start_step: 1
-ln_ablation_max_to_remove: null

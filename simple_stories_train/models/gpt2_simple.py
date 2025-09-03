@@ -1,3 +1,9 @@
+"""Version of GPT-2 with separate projection layers for query, key, and value.
+
+We don't bother with utilities for converting this to the default HF model. This model is intended
+to be used directly with the simple_stories_train library.
+"""
+
 import inspect
 import math
 from pathlib import Path
@@ -70,7 +76,6 @@ class CausalSelfAttention(nn.Module):
         self.n_embd = config.n_embd
         self.flash_attention = config.flash_attention
         # key, query, value projections for all heads, but in a batch
-        # self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd)
         self.q_proj = nn.Linear(config.n_embd, config.n_embd)
         self.k_proj = nn.Linear(config.n_embd, config.n_embd)
         self.v_proj = nn.Linear(config.n_embd, config.n_embd)

@@ -1,4 +1,4 @@
-from __future__ import annotations
+"""Utilities for ablating layernorm as in https://arxiv.org/abs/2507.02559."""
 
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -91,16 +91,16 @@ def load_ln_stats(path: Path) -> LnStats:
     with open(path) as f:
         data: dict[str, Any] = yaml.safe_load(f)
     return LnStats(
-        model_id=data.get("model_id", ""),
-        n_layer=int(data.get("n_layer", 0)),
-        n_embd=int(data.get("n_embd", 0)),
-        eps=float(data.get("eps", 1e-5)),
-        stats=dict(data.get("stats", {})),
+        model_id=data["model_id"],
+        n_layer=data["n_layer"],
+        n_embd=data["n_embd"],
+        eps=data["eps"],
+        stats=data["stats"],
     )
 
 
 def get_sigma_for_path(stats: LnStats, module_path: str) -> float:
-    entry = stats.stats.get(module_path)
-    if entry is None or "sigma_avg" not in entry:
+    entry = stats.stats[module_path]
+    if "sigma_avg" not in entry:
         raise KeyError(f"No sigma_avg for path {module_path} in stats file")
     return float(entry["sigma_avg"])
