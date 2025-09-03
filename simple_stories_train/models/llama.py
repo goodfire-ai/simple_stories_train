@@ -1,6 +1,6 @@
 import inspect
 import math
-from pathlib import Path
+import os
 from typing import cast
 
 import torch
@@ -13,7 +13,6 @@ from torch.nn import functional as F
 from transformers import LlamaConfig as HFLlamaConfig
 from transformers import LlamaForCausalLM
 
-from simple_stories_train.run_info import RunInfo
 from simple_stories_train.utils import print0
 
 # pyright: reportAttributeAccessIssue=false, reportIndexIssue=false
@@ -354,24 +353,56 @@ class Llama(nn.Module):
         return logits, loss
 
     @classmethod
-    def from_run_info(cls, run_info: RunInfo) -> "Llama":
-        """Create a Llama model from a RunInfo, loading weights from its checkpoint."""
-        model = cls(LlamaConfig(**run_info.model_config_dict))
-        state_dict = torch.load(run_info.checkpoint_path, map_location="cpu", weights_only=True)
-        model.load_state_dict(state_dict, strict=True)
-        return model
+    def from_pretrained(
+        cls, model_path_or_id: str, config: LlamaConfig, strict: bool = True
+    ) -> "Llama":
+        is_local = os.path.exists(model_path_or_id)
 
-    @classmethod
-    def from_pretrained(cls, model_path: str | Path) -> "Llama":
-        """Create a Llama model from a wandb string or a local path.
+        if is_local:
+            # Handle local files (existing logic for custom format)
+            state_dict = torch.load(model_path_or_id, weights_only=True, map_location="cpu")
+            model = cls(config)
 
-        Args:
-            model_path:
-                - W&B strings: 'wandb:goodfire/spd-play/runs/152i5k4r'
-                - Local: path to a .pt checkpoint file
-        """
-        run_info = RunInfo.from_path(model_path)
-        return cls.from_run_info(run_info)
+            state_dict = {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
+
+            # Remove rotary_sin and rotary_cos from state_dict to regenerate them
+            keys_to_remove = [
+                k for k in state_dict if k.endswith("rotary_sin") or k.endswith("rotary_cos")
+            ]
+            for k in keys_to_remove:
+                state_dict.pop(k)
+
+            # Load state dict (ignoring rotary buffers)
+            model.load_state_dict(state_dict, strict=strict)
+
+            # Regenerate rotary_sin and rotary_cos for each attention layer
+            for _, block in enumerate(model.transformer.h):  # type: ignore
+                attn = block.attn
+                sin, cos = attn.calculate_sin_cos_rotary(
+                    rotary_dim=attn.rotary_dim,
+                    n_ctx=attn.n_ctx,
+                    base=attn.rotary_base,
+                    dtype=attn.rotary_cos.dtype if hasattr(attn, "rotary_cos") else torch.float32,
+                )
+                attn.register_buffer("rotary_sin", sin)
+                attn.register_buffer("rotary_cos", cos)
+
+            return model
+
+        else:
+            # Handle HuggingFace Hub models using the conversion function
+            try:
+                hf_model = LlamaForCausalLM.from_pretrained(model_path_or_id)
+
+                model = convert_llama_for_causal_lm_to_llama(hf_model)
+
+                return model
+
+            except Exception as err:
+                raise ValueError(
+                    f"Error loading model from HuggingFace Hub: {str(err)}. "
+                    f"Please ensure the model path or ID '{model_path_or_id}' is correct."
+                ) from err
 
     def configure_optimizers(
         self,
