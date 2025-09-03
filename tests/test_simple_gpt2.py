@@ -3,7 +3,7 @@ import torch
 from jaxtyping import Float
 from torch import Tensor
 
-from simple_stories_train.models.gpt2 import LayerNorm as CustomLayerNorm
+from simple_stories_train.models.gpt2_simple import LayerNorm as CustomLayerNorm
 
 
 def _make_modules(d_model: int, eps: float) -> tuple[CustomLayerNorm, torch.nn.LayerNorm]:

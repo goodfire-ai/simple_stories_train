@@ -1,12 +1,8 @@
 """Utilities for ablating layernorm as in https://arxiv.org/abs/2507.02559."""
 
 from collections.abc import Iterator
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Any
 
 import torch.nn as nn
-import yaml
 
 from simple_stories_train.models.gpt2_simple import LayerNorm
 
@@ -76,31 +72,3 @@ def set_ln_std_at_path(model: nn.Module, module_path: str, std_value: float) -> 
         f"Custom LayerNorm at {module_path} does not expose a `std` attribute: {type(child)}"
     )
     child.std = std_value
-
-
-@dataclass
-class LnStats:
-    model_id: str
-    n_layer: int
-    n_embd: int
-    eps: float
-    stats: dict[str, dict[str, float]]  # {module_path: {"sigma_avg": float}}
-
-
-def load_ln_stats(path: Path) -> LnStats:
-    with open(path) as f:
-        data: dict[str, Any] = yaml.safe_load(f)
-    return LnStats(
-        model_id=data["model_id"],
-        n_layer=data["n_layer"],
-        n_embd=data["n_embd"],
-        eps=data["eps"],
-        stats=data["stats"],
-    )
-
-
-def get_sigma_for_path(stats: LnStats, module_path: str) -> float:
-    entry = stats.stats[module_path]
-    if "sigma_avg" not in entry:
-        raise KeyError(f"No sigma_avg for path {module_path} in stats file")
-    return float(entry["sigma_avg"])

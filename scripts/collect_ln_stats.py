@@ -1,6 +1,13 @@
+"""Script to collect LN stats for a model.
+
+Usage:
+```bash
+python scripts/collect_ln_stats.py --batches 50 --batch_size 64 --n_ctx 512 --model_path wandb:goodfire/spd/runs/syhzse3u
+```
+"""
+
 import argparse
 from collections.abc import Callable
-from pathlib import Path
 from typing import Any
 
 import torch
@@ -12,18 +19,16 @@ from torch import Tensor
 from simple_stories_train.dataloaders import DatasetConfig, create_data_loader
 from simple_stories_train.models.gpt2_simple import GPT2Simple, GPT2SimpleConfig
 from simple_stories_train.run_info import RunInfo
+from simple_stories_train.utils import REPO_ROOT
 
 
 @torch.no_grad()
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--output", type=str, required=True, help="Path to write stats YAML")
     parser.add_argument("--batches", type=int, default=50, help="Number of batches to average")
     parser.add_argument("--batch_size", type=int, default=64, help="Batch size per step")
     parser.add_argument("--eps", type=float, default=1e-5)
-    parser.add_argument(
-        "--model_path", type=str, required=True, help="Path to wandb run or local checkpoint"
-    )
+    parser.add_argument("--model_path", type=str, required=True, help="wandb path")
     # Dataset
     parser.add_argument("--dataset_name", type=str, default="SimpleStories/SimpleStories")
     parser.add_argument("--streaming", type=int, default=0)
@@ -35,6 +40,8 @@ def main() -> None:
         default="simple_stories_train/tokenizer/simplestories-tokenizer.json",
     )
     args = parser.parse_args()
+
+    assert args.model_path.startswith("wandb:"), "Currently only supports wandb paths"
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     run_info = RunInfo.from_path(args.model_path)
@@ -99,17 +106,16 @@ def main() -> None:
     stats = {}
     for path in running:
         if counts[path] > 0:
-            stats[path] = {"sigma_avg": running[path] / counts[path]}
+            stats[path] = running[path] / counts[path]
 
-    out = {
-        "model_path": args.model_path,
-        "stats": stats,
-    }
-    Path(args.output).parent.mkdir(parents=True, exist_ok=True)
-    with open(args.output, "w") as f:
+    out = {"model_path": args.model_path, "stats": stats}
+    out_path = REPO_ROOT / "out"
+    out_path.mkdir(parents=True, exist_ok=True)
+    filename = out_path / f"{args.model_path.split('/')[-1]}-ln-stats.yaml"
+    with open(filename, "w") as f:
         yaml.safe_dump(out, f)
 
-    print(f"Saved LN stats to {args.output}")
+    print(f"Saved LN stats to {filename}")
 
 
 if __name__ == "__main__":

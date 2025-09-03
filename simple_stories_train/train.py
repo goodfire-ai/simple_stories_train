@@ -31,6 +31,7 @@ import torch._inductor.config as torch_inductor_config
 import torch.distributed as dist
 import torch.nn as nn
 import wandb
+import yaml
 from dotenv import load_dotenv
 from pydantic import (
     BaseModel,
@@ -47,10 +48,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 
 from simple_stories_train.dataloaders import DatasetConfig, create_data_loader
 from simple_stories_train.ln_free import (
-    LnStats,
     build_paper_order_paths,
-    get_sigma_for_path,
-    load_ln_stats,
     set_ln_std_at_path,
 )
 from simple_stories_train.models.gpt2 import GPT2
@@ -177,7 +175,7 @@ def maybe_replace_one_ln(
     config: Config,
     step: int,
     ln_order_paths: list[str],
-    ln_stats: LnStats | None,
+    ln_stats: dict[str, float] | None,
     replaced_count: int,
 ) -> int:
     """Conditionally set a single LayerNorm's fixed std according to the schedule.
@@ -199,10 +197,10 @@ def maybe_replace_one_ln(
         path_to_replace = ln_order_paths[replaced_count]
         if ln_stats is None:
             raise ValueError("enable_ln_ablation=True but ln_stats is None")
-        sigma_avg = get_sigma_for_path(ln_stats, path_to_replace)
+        sigma_avg = ln_stats[path_to_replace]
         set_ln_std_at_path(raw_model, path_to_replace, std_value=sigma_avg)
         replaced_count += 1
-        print0(f"Set LN std at step {step}: {path_to_replace} (std={sigma_avg:.6f})")
+        print0(f"Replace LN at step {step}: {path_to_replace} (std={sigma_avg:.6f})")
     return replaced_count
 
 
@@ -380,13 +378,15 @@ def main(config_path_or_obj: Path | str | Config | None = None, **kwargs: Any) -
     generations: list[list[Any]] = []
     # LN ablation setup
     ln_order_paths: list[str] = []
-    ln_stats = None
+    ln_stats: dict[str, float] | None = None
     replaced_count = 0
 
     if config.enable_ln_ablation:
         ln_order_paths = build_paper_order_paths(raw_model)
         if config.ln_stats_path is not None:
-            ln_stats = load_ln_stats(REPO_ROOT / config.ln_stats_path)
+            with open(REPO_ROOT / config.ln_stats_path) as f:
+                # Average std for each LN module
+                ln_stats = yaml.safe_load(f)["stats"]
         else:
             raise ValueError("enable_ln_ablation=True but ln_stats_path is None")
 

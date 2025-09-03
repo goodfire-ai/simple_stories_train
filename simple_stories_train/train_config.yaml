@@ -22,8 +22,7 @@ model_id: gpt2_simple-1.25M
 # 1 GPU
 batch_size: 64
 total_batch_size: 32768 # 64 * 512
-# num_iterations: 200_000 # custom iterations, reload the train loader if we exhaust data
-num_iterations: 9000 # custom iterations, reload the train loader if we exhaust data
+num_iterations: 100_000 # custom iterations, reload the train loader if we exhaust data
 warmup_iters: 600
 # # 4 GPUs
 # batch_size: 64
@@ -39,10 +38,11 @@ val_max_steps: 20
 sample_every: 1000
 intermediate_checkpoints: false
 
-# # from_pretrained: null
-# from_pretrained: "wandb:goodfire/spd-play/runs/c1ts34rh"
+# For finetuning (and ablating LN stds)
+# from_pretrained: "wandb:goodfire/spd/runs/syhzse3u"
+# num_iterations: 9000
 # enable_ln_ablation: true
-# ln_stats_path: out/gpt2_simple-1.25M-stats-c1ts34rh.yaml # 100k steps
+# ln_stats_path: out/syhzse3u-ln-stats.yaml
 # n_steps_between_ln_ablation: 500
 # ln_ablation_start_step: 1
 # ln_ablation_max_to_remove: null
