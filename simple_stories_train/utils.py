@@ -26,20 +26,31 @@ def is_checkpoint_step(step: int) -> bool:
     return (0 < step < 1000 and (step & (step - 1)) == 0) or step % 1000 == 0
 
 
-def save_config(save_dir: Path, config_dict: dict[str, Any]) -> None:
+def save_configs(
+    save_dir: Path, config_dict: dict[str, Any], model_config_dict: dict[str, Any]
+) -> None:
     config_file = save_dir / "final_config.yaml"
     with open(config_file, "w") as f:
         yaml.dump(config_dict, f)
     print0(f"Saved config to {config_file}")
+    model_config_file = save_dir / "model_config.yaml"
+    with open(model_config_file, "w") as f:
+        yaml.dump(model_config_dict, f)
+    print0(f"Saved model config to {model_config_file}")
+
     if config_dict.get("wandb_project"):
         wandb.save(str(config_file), policy="now", base_path=save_dir)
-        print0(f"Saved config to wandb: {str(config_file)}")
+        print0(f"Saved config to wandb from {str(config_file)}")
+        wandb.save(str(model_config_file), policy="now", base_path=save_dir)
+        print0(f"Saved model config to wandb from {str(model_config_file)}")
 
 
 def save_model(
     save_dir: Path, model: nn.Module, step: int, wandb_project: str | None = None
 ) -> None:
     state_dict = model.state_dict()
+    # Remove DDP prefixes if present
+    state_dict = {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
 
     model_file = save_dir / f"model_step_{step}.pt"
     torch.save(state_dict, model_file)

@@ -31,6 +31,7 @@ import torch._inductor.config as torch_inductor_config
 import torch.distributed as dist
 import torch.nn as nn
 import wandb
+import yaml
 from dotenv import load_dotenv
 from pydantic import (
     BaseModel,
@@ -46,7 +47,12 @@ from torch.distributed import destroy_process_group, init_process_group
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 from simple_stories_train.dataloaders import DatasetConfig, create_data_loader
+from simple_stories_train.ln_free import (
+    build_paper_order_paths,
+    set_ln_std_at_path,
+)
 from simple_stories_train.models.gpt2 import GPT2
+from simple_stories_train.models.gpt2_simple import GPT2Simple
 from simple_stories_train.models.llama import Llama
 from simple_stories_train.models.model_configs import MODEL_CONFIGS
 from simple_stories_train.utils import (
@@ -56,13 +62,14 @@ from simple_stories_train.utils import (
     log_generations,
     log_metrics,
     print0,
-    save_config,
+    save_configs,
     save_model,
 )
 
 FAMILY_TO_MODEL: dict[str, type[nn.Module]] = {
     "llama": Llama,
     "gpt2": GPT2,
+    "gpt2_simple": GPT2Simple,
 }
 
 
@@ -138,12 +145,63 @@ class Config(BaseModel):
     intermediate_checkpoints: bool = Field(
         False, description="Save intermediate checkpoints (done at steps 0, 1, 2, 4, 8, ...)?"
     )
+    from_pretrained: str | Path | None = Field(
+        None, description="Path to a wandb string or a local path to a checkpoint to finetune from"
+    )
+    # LN ablation configs
+    enable_ln_ablation: bool = Field(
+        False, description="Enable staged setting of LayerNorm std (no module swapping)"
+    )
+    ln_stats_path: Path | None = Field(None, description="YAML with sigma_avg per LN module path")
+    n_steps_between_ln_ablation: NonNegativeInt = Field(
+        0, description="Steps between replacing successive LN layers"
+    )
+    ln_ablation_start_step: NonNegativeInt = Field(
+        1, description="First global step eligible for LN replacement"
+    )
+    ln_ablation_max_to_remove: NonNegativeInt | None = Field(
+        None, description="Optional cap on number of LN layers to replace"
+    )
 
     @model_validator(mode="after")
     def validate_model(self) -> Self:
         if self.model_id not in MODEL_CONFIGS:
             raise ValueError(f"model_id {self.model_id} not in {tuple(MODEL_CONFIGS.keys())}")
         return self
+
+
+def maybe_replace_one_ln(
+    raw_model: nn.Module,
+    config: Config,
+    step: int,
+    ln_order_paths: list[str],
+    ln_stats: dict[str, float] | None,
+    replaced_count: int,
+) -> int:
+    """Conditionally set a single LayerNorm's fixed std according to the schedule.
+
+    Returns the updated `replaced_count`.
+    """
+    if not (config.enable_ln_ablation and config.n_steps_between_ln_ablation > 0):
+        return replaced_count
+
+    can_replace_more = (
+        config.ln_ablation_max_to_remove is None
+        or replaced_count < config.ln_ablation_max_to_remove
+    )
+    due = (
+        step >= config.ln_ablation_start_step
+        and (step - config.ln_ablation_start_step) % config.n_steps_between_ln_ablation == 0
+    )
+    if due and can_replace_more and replaced_count < len(ln_order_paths):
+        path_to_replace = ln_order_paths[replaced_count]
+        if ln_stats is None:
+            raise ValueError("enable_ln_ablation=True but ln_stats is None")
+        sigma_avg = ln_stats[path_to_replace]
+        set_ln_std_at_path(raw_model, path_to_replace, std_value=sigma_avg)
+        replaced_count += 1
+        print0(f"Replace LN at step {step}: {path_to_replace} (std={sigma_avg:.6f})")
+    return replaced_count
 
 
 def main(config_path_or_obj: Path | str | Config | None = None, **kwargs: Any) -> None:
@@ -221,6 +279,15 @@ def main(config_path_or_obj: Path | str | Config | None = None, **kwargs: Any) -
     model_ctor = FAMILY_TO_MODEL[family]
     model: nn.Module = model_ctor(model_config)
 
+    # Load pretrained weights
+    if config.from_pretrained is not None:
+        assert hasattr(model_ctor, "from_pretrained"), (
+            f"Model {config.model_id} does not support from_pretrained"
+        )
+        pretrained_model = model_ctor.from_pretrained(config.from_pretrained)  # pyright: ignore[reportAttributeAccessIssue]
+        model.load_state_dict(pretrained_model.state_dict())
+    model.to(device)
+
     model.train()
     model.to(device)
     if config.compile:
@@ -297,7 +364,11 @@ def main(config_path_or_obj: Path | str | Config | None = None, **kwargs: Any) -
             pass
         checkpoints_dir = output_dir / "checkpoints"
         checkpoints_dir.mkdir(parents=True, exist_ok=True)
-        save_config(checkpoints_dir, config_dict=config.model_dump(mode="json"))
+        save_configs(
+            checkpoints_dir,
+            config_dict=config.model_dump(mode="json"),
+            model_config_dict=model_config.model_dump(mode="json"),
+        )
         if config.intermediate_checkpoints:
             save_model(checkpoints_dir, raw_model, step=0, wandb_project=config.wandb_project)
 
@@ -305,6 +376,20 @@ def main(config_path_or_obj: Path | str | Config | None = None, **kwargs: Any) -
         torch.cuda.reset_peak_memory_stats()
     timings: list[float] = []
     generations: list[list[Any]] = []
+    # LN ablation setup
+    ln_order_paths: list[str] = []
+    ln_stats: dict[str, float] | None = None
+    replaced_count = 0
+
+    if config.enable_ln_ablation:
+        ln_order_paths = build_paper_order_paths(raw_model)
+        if config.ln_stats_path is not None:
+            with open(REPO_ROOT / config.ln_stats_path) as f:
+                # Average std for each LN module
+                ln_stats = yaml.safe_load(f)["stats"]
+        else:
+            raise ValueError("enable_ln_ablation=True but ln_stats_path is None")
+
     for step in range(1, config.num_iterations + 1):
         last_step = step == config.num_iterations
 
@@ -316,7 +401,7 @@ def main(config_path_or_obj: Path | str | Config | None = None, **kwargs: Any) -
                 val_loss = 0.0
                 for _ in range(config.val_max_steps):
                     try:
-                        bat = next(val_loader_iter)["input_ids"].to(torch.int)
+                        bat = next(val_loader_iter)["input_ids"].to(torch.long)
                     except StopIteration:
                         break
                     x = bat.view(B, T)[:, :-1]
@@ -357,16 +442,25 @@ def main(config_path_or_obj: Path | str | Config | None = None, **kwargs: Any) -
 
         # training
         model.train()
+        # maybe set one LN std according to schedule
+        replaced_count = maybe_replace_one_ln(
+            raw_model=raw_model,
+            config=config,
+            step=step,
+            ln_order_paths=ln_order_paths,
+            ln_stats=ln_stats,
+            replaced_count=replaced_count,
+        )
         optimizer.zero_grad(set_to_none=True)
         lossf = torch.tensor([0.0], device=device)
         t0 = time.time()
         for micro_step in range(grad_accum_steps):
             try:
-                bat = next(train_iter)["input_ids"].to(torch.int)
+                bat = next(train_iter)["input_ids"].to(torch.long)
             except StopIteration:
                 print0("Depleted train_loader, resetting for next epoch")
                 train_iter = iter(train_loader)
-                bat = next(train_iter)["input_ids"].to(torch.int)
+                bat = next(train_iter)["input_ids"].to(torch.long)
 
             x = bat.view(B, T)[:, :-1]
             y = bat.view(B, T)[:, 1:]
