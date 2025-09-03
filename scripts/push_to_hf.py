@@ -130,6 +130,7 @@ def load_config_from_checkpoint_dir(checkpoint_path: Path) -> tuple[str, LlamaCo
         raise ValueError("'model_id' missing or invalid in final_config.yaml")
 
     preset = MODEL_CONFIGS.get(model_id)
+    assert preset is None or isinstance(preset, LlamaConfig | GPT2Config)
     if preset is None:
         raise ValueError(
             f"Unknown model_id '{model_id}' in final_config.yaml."
