@@ -362,13 +362,13 @@ def main(config_path_or_obj: Path | str | Config | None = None, **kwargs: Any) -
         logfile = output_dir / "main.log"
         with open(logfile, "w") as f:
             pass
-        checkpoints_dir = output_dir / "checkpoints"
-        checkpoints_dir.mkdir(parents=True, exist_ok=True)
         save_configs(
-            checkpoints_dir,
+            output_dir,
             config_dict=config.model_dump(mode="json"),
             model_config_dict=model_config.model_dump(mode="json"),
         )
+        checkpoints_dir = output_dir / "checkpoints"
+        checkpoints_dir.mkdir(parents=True, exist_ok=True)
         if config.intermediate_checkpoints:
             save_model(checkpoints_dir, raw_model, step=0, wandb_project=config.wandb_project)
 
