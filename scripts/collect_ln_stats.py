@@ -7,12 +7,13 @@ python scripts/collect_ln_stats.py --batches 50 --batch_size 64 --n_ctx 512 --mo
 """
 
 import argparse
+import json
 from collections.abc import Callable
 from typing import Any
 
 import torch
 import torch.nn as nn
-import yaml
+import wandb
 from jaxtyping import Float
 from torch import Tensor
 
@@ -28,8 +29,12 @@ def main() -> None:
     parser.add_argument("--batches", type=int, default=50, help="Number of batches to average")
     parser.add_argument("--batch_size", type=int, default=64, help="Batch size per step")
     parser.add_argument("--eps", type=float, default=1e-5)
-    parser.add_argument("--model_path", type=str, required=True, help="wandb path")
-    # Dataset
+    parser.add_argument(
+        "--wandb_path",
+        type=str,
+        required=True,
+        help="wandb path (e.g. wandb:goodfire/spd/runs/syhzse3u)",
+    )
     parser.add_argument("--dataset_name", type=str, default="SimpleStories/SimpleStories")
     parser.add_argument("--streaming", type=int, default=0)
     parser.add_argument("--split", type=str, default="train")
@@ -41,10 +46,10 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    assert args.model_path.startswith("wandb:"), "Currently only supports wandb paths"
+    assert args.wandb_path.startswith("wandb:"), "Currently only supports wandb paths"
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    run_info = RunInfo.from_path(args.model_path)
+    run_info = RunInfo.from_path(args.wandb_path)
     model = GPT2Simple(GPT2SimpleConfig(**run_info.model_config_dict))
     model.to(device)
     model.eval()
@@ -108,12 +113,16 @@ def main() -> None:
         if counts[path] > 0:
             stats[path] = running[path] / counts[path]
 
-    out = {"model_path": args.model_path, "stats": stats}
+    out = {"model_path": args.wandb_path, "stats": stats}
     out_path = REPO_ROOT / "out"
     out_path.mkdir(parents=True, exist_ok=True)
-    filename = out_path / f"{args.model_path.split('/')[-1]}-ln-stats.yaml"
+    filename = out_path / "ln-stats.json"
     with open(filename, "w") as f:
-        yaml.safe_dump(out, f)
+        json.dump(out, f, indent=2)
+
+    api = wandb.Api()
+    run = api.run(args.wandb_path.removeprefix("wandb:"))
+    run.upload_file(filename, root=out_path)
 
     print(f"Saved LN stats to {filename}")
 
