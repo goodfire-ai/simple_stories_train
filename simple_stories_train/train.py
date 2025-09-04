@@ -31,7 +31,6 @@ import torch._inductor.config as torch_inductor_config
 import torch.distributed as dist
 import torch.nn as nn
 import wandb
-import yaml
 from dotenv import load_dotenv
 from pydantic import (
     BaseModel,
@@ -55,6 +54,7 @@ from simple_stories_train.models.gpt2 import GPT2
 from simple_stories_train.models.gpt2_simple import GPT2Simple
 from simple_stories_train.models.llama import Llama
 from simple_stories_train.models.model_configs import MODEL_CONFIGS
+from simple_stories_train.run_info import RunInfo
 from simple_stories_train.utils import (
     REPO_ROOT,
     is_checkpoint_step,
@@ -152,7 +152,6 @@ class Config(BaseModel):
     enable_ln_ablation: bool = Field(
         False, description="Enable staged setting of LayerNorm std (no module swapping)"
     )
-    ln_stats_path: Path | None = Field(None, description="YAML with sigma_avg per LN module path")
     n_steps_between_ln_ablation: NonNegativeInt = Field(
         0, description="Steps between replacing successive LN layers"
     )
@@ -175,15 +174,13 @@ def maybe_replace_one_ln(
     config: Config,
     step: int,
     ln_order_paths: list[str],
-    ln_stats: dict[str, float] | None,
+    ln_stds: dict[str, float],
     replaced_count: int,
 ) -> int:
     """Conditionally set a single LayerNorm's fixed std according to the schedule.
 
     Returns the updated `replaced_count`.
     """
-    if not (config.enable_ln_ablation and config.n_steps_between_ln_ablation > 0):
-        return replaced_count
 
     can_replace_more = (
         config.ln_ablation_max_to_remove is None
@@ -195,9 +192,7 @@ def maybe_replace_one_ln(
     )
     if due and can_replace_more and replaced_count < len(ln_order_paths):
         path_to_replace = ln_order_paths[replaced_count]
-        if ln_stats is None:
-            raise ValueError("enable_ln_ablation=True but ln_stats is None")
-        sigma_avg = ln_stats[path_to_replace]
+        sigma_avg = ln_stds[path_to_replace]
         set_ln_std_at_path(raw_model, path_to_replace, std_value=sigma_avg)
         replaced_count += 1
         print0(f"Replace LN at step {step}: {path_to_replace} (std={sigma_avg:.6f})")
@@ -378,17 +373,17 @@ def main(config_path_or_obj: Path | str | Config | None = None, **kwargs: Any) -
     generations: list[list[Any]] = []
     # LN ablation setup
     ln_order_paths: list[str] = []
-    ln_stats: dict[str, float] | None = None
+    ln_stds: dict[str, float] | None = None
     replaced_count = 0
 
     if config.enable_ln_ablation:
+        assert isinstance(config.from_pretrained, str) and config.from_pretrained.startswith(
+            "wandb:"
+        ), "Currently only supports wandb paths"
+        assert config.from_pretrained is not None
+        ln_stds = RunInfo.from_path(config.from_pretrained).ln_stds
+        assert ln_stds is not None, "enable_ln_ablation=True but ln_stds is None"
         ln_order_paths = build_paper_order_paths(raw_model)
-        if config.ln_stats_path is not None:
-            with open(REPO_ROOT / config.ln_stats_path) as f:
-                # Average std for each LN module
-                ln_stats = yaml.safe_load(f)["stats"]
-        else:
-            raise ValueError("enable_ln_ablation=True but ln_stats_path is None")
 
     for step in range(1, config.num_iterations + 1):
         last_step = step == config.num_iterations
@@ -442,15 +437,18 @@ def main(config_path_or_obj: Path | str | Config | None = None, **kwargs: Any) -
 
         # training
         model.train()
-        # maybe set one LN std according to schedule
-        replaced_count = maybe_replace_one_ln(
-            raw_model=raw_model,
-            config=config,
-            step=step,
-            ln_order_paths=ln_order_paths,
-            ln_stats=ln_stats,
-            replaced_count=replaced_count,
-        )
+
+        if config.enable_ln_ablation and config.n_steps_between_ln_ablation > 0:
+            assert ln_stds is not None, "enable_ln_ablation=True but ln_stds is None"
+            # maybe set one LN std according to schedule
+            replaced_count = maybe_replace_one_ln(
+                raw_model=raw_model,
+                config=config,
+                step=step,
+                ln_order_paths=ln_order_paths,
+                ln_stds=ln_stds,
+                replaced_count=replaced_count,
+            )
         optimizer.zero_grad(set_to_none=True)
         lossf = torch.tensor([0.0], device=device)
         t0 = time.time()

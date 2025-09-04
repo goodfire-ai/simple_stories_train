@@ -39,10 +39,9 @@ sample_every: 1000
 intermediate_checkpoints: false
 
 # For finetuning (and ablating LN stds)
-# from_pretrained: "wandb:goodfire/spd/runs/syhzse3u"
-# num_iterations: 9000
-# enable_ln_ablation: true
-# ln_stats_path: out/syhzse3u-ln-stats.yaml
-# n_steps_between_ln_ablation: 500
-# ln_ablation_start_step: 1
-# ln_ablation_max_to_remove: null
+from_pretrained: "wandb:goodfire/spd/runs/syhzse3u"
+num_iterations: 9000
+enable_ln_ablation: true
+n_steps_between_ln_ablation: 500
+ln_ablation_start_step: 1
+ln_ablation_max_to_remove: null

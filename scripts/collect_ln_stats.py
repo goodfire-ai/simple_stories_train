@@ -2,7 +2,7 @@
 
 Usage:
 ```bash
-python scripts/collect_ln_stats.py --batches 50 --batch_size 64 --n_ctx 512 --model_path wandb:goodfire/spd/runs/syhzse3u
+python scripts/collect_ln_stats.py --batches 50 --batch_size 64 --n_ctx 512 --wandb_path wandb:goodfire/spd/runs/syhzse3u
 ```
 """
 
@@ -113,12 +113,11 @@ def main() -> None:
         if counts[path] > 0:
             stats[path] = running[path] / counts[path]
 
-    out = {"model_path": args.wandb_path, "stats": stats}
     out_path = REPO_ROOT / "out"
     out_path.mkdir(parents=True, exist_ok=True)
-    filename = out_path / "ln-stats.json"
+    filename = out_path / "ln-stds.json"
     with open(filename, "w") as f:
-        json.dump(out, f, indent=2)
+        json.dump(stats, f, indent=2)
 
     api = wandb.Api()
     run = api.run(args.wandb_path.removeprefix("wandb:"))
