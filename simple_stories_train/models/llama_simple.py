@@ -305,21 +305,29 @@ class LlamaSimple(nn.Module):
     def __init__(self, config: LlamaSimpleConfig):
         super().__init__()
         self.config = config
-        _blocks: list[Block] = [Block(config) for _ in range(config.n_layer)]
-        # Keep a typed Python list view for static type checking/iteration
-        self.h: list[Block] = _blocks
-        self.transformer: nn.ModuleDict = nn.ModuleDict(
-            {
-                "wte": nn.Embedding(config.vocab_size, config.n_embd),
-                "h": nn.ModuleList(_blocks),
-                "rms_f": LlamaRMSNorm(config.n_embd, eps=config.rms_norm_eps),
-            }
-        )
+        ########### NEW CODE ###########
+        self.wte: nn.Embedding = nn.Embedding(config.vocab_size, config.n_embd)
+        self._h: list[Block] = [Block(config) for _ in range(config.n_layer)]
+        self.h: nn.ModuleList = nn.ModuleList(self._h)
+        self.ln_f: LlamaRMSNorm = LlamaRMSNorm(config.n_embd, eps=config.rms_norm_eps)
+        ########### END NEW CODE ###########
+        ########### OLD CODE ###########
+        # _blocks: list[Block] = [Block(config) for _ in range(config.n_layer)]
+        # # Keep a typed Python list view for static type checking/iteration
+        # self.h: list[Block] = _blocks
+        # self.transformer: nn.ModuleDict = nn.ModuleDict(
+        #     {
+        #         "wte": nn.Embedding(config.vocab_size, config.n_embd),
+        #         "h": nn.ModuleList(_blocks),
+        #         "rms_f": LlamaRMSNorm(config.n_embd, eps=config.rms_norm_eps),
+        #     }
+        # )
+        ########### END OLD CODE ###########
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
         self.lm_head.LLMC_SKIP_INIT = True  # type: ignore
 
         # Tie embeddings and lm_head weights
-        self.transformer.wte.weight = self.lm_head.weight  # type: ignore[reportAttributeAccessIssue]
+        self.wte.weight = self.lm_head.weight  # type: ignore[reportAttributeAccessIssue]
         self.init_rng = torch.Generator()
         self.init_rng.manual_seed(42)
         self.apply(self._init_weights)
@@ -350,11 +358,11 @@ class LlamaSimple(nn.Module):
         assert t <= self.config.block_size, (
             f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
         )
-        tok_emb = self.transformer.wte(idx)  # pyright: ignore[reportCallIssue]
+        tok_emb = self.wte(idx)  # pyright: ignore[reportCallIssue]
         x = tok_emb
-        for block in self.transformer.h:  # pyright: ignore[reportGeneralTypeIssues]
+        for block in self._h:  # pyright: ignore[reportGeneralTypeIssues]
             x = block(x)
-        x = self.transformer.rms_f(x)  # pyright: ignore[reportCallIssue]
+        x = self.ln_f(x)  # pyright: ignore[reportCallIssue]
         logits = self.lm_head(x)
         loss = None
         if targets is not None:
