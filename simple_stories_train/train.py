@@ -53,6 +53,7 @@ from simple_stories_train.ln_free import (
 from simple_stories_train.models.gpt2 import GPT2
 from simple_stories_train.models.gpt2_simple import GPT2Simple
 from simple_stories_train.models.llama import Llama
+from simple_stories_train.models.llama_simple import LlamaSimple
 from simple_stories_train.models.model_configs import MODEL_CONFIGS
 from simple_stories_train.run_info import RunInfo
 from simple_stories_train.utils import (
@@ -68,6 +69,7 @@ from simple_stories_train.utils import (
 
 FAMILY_TO_MODEL: dict[str, type[nn.Module]] = {
     "llama": Llama,
+    "llama_simple": LlamaSimple,
     "gpt2": GPT2,
     "gpt2_simple": GPT2Simple,
 }
@@ -258,9 +260,9 @@ def main(config_path_or_obj: Path | str | Config | None = None, **kwargs: Any) -
     )
 
     # rng / reproducibility
-    torch.manual_seed(42)
+    torch.manual_seed(45)
     if torch.cuda.is_available():
-        torch.cuda.manual_seed(42)
+        torch.cuda.manual_seed(45)
 
     # TF32
     if config.tensorcores:
@@ -346,6 +348,18 @@ def main(config_path_or_obj: Path | str | Config | None = None, **kwargs: Any) -
         coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))
         return min_lr + coeff * (config.learning_rate - min_lr)
 
+    # For LN ablation
+    ln_order_paths: list[str] = []
+    ln_stds: dict[str, float] | None = None
+    if config.enable_ln_ablation:
+        assert isinstance(config.from_pretrained, str) and config.from_pretrained.startswith(
+            "wandb:"
+        ), "Currently only supports wandb paths"
+        assert config.from_pretrained is not None
+        ln_stds = RunInfo.from_path(config.from_pretrained).ln_stds
+        assert ln_stds is not None, "enable_ln_ablation=True but ln_stds is None"
+        ln_order_paths = build_paper_order_paths(raw_model)
+
     # IO dirs
     logfile = None
     checkpoints_dir = None
@@ -361,6 +375,7 @@ def main(config_path_or_obj: Path | str | Config | None = None, **kwargs: Any) -
             output_dir,
             config_dict=config.model_dump(mode="json"),
             model_config_dict=model_config.model_dump(mode="json"),
+            ln_stds=ln_stds,
         )
         checkpoints_dir = output_dir / "checkpoints"
         checkpoints_dir.mkdir(parents=True, exist_ok=True)
@@ -371,19 +386,8 @@ def main(config_path_or_obj: Path | str | Config | None = None, **kwargs: Any) -
         torch.cuda.reset_peak_memory_stats()
     timings: list[float] = []
     generations: list[list[Any]] = []
-    # LN ablation setup
-    ln_order_paths: list[str] = []
-    ln_stds: dict[str, float] | None = None
+    # For LN ablation
     replaced_count = 0
-
-    if config.enable_ln_ablation:
-        assert isinstance(config.from_pretrained, str) and config.from_pretrained.startswith(
-            "wandb:"
-        ), "Currently only supports wandb paths"
-        assert config.from_pretrained is not None
-        ln_stds = RunInfo.from_path(config.from_pretrained).ln_stds
-        assert ln_stds is not None, "enable_ln_ablation=True but ln_stds is None"
-        ln_order_paths = build_paper_order_paths(raw_model)
 
     for step in range(1, config.num_iterations + 1):
         last_step = step == config.num_iterations
