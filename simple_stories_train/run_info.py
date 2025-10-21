@@ -8,6 +8,8 @@ from typing import Any
 
 import wandb
 import yaml
+from tokenizers import Tokenizer as HFTokenizer
+from transformers import AutoTokenizer
 
 from simple_stories_train.utils import REPO_ROOT
 
@@ -26,10 +28,12 @@ def _cache_dir_for_slug(slug: str) -> Path:
     return REPO_ROOT / ".cache" / "wandb_runs" / slug
 
 
-def _download_wandb_files(wandb_path_no_prefix: str) -> tuple[Path, Path, Path, Path | None]:
-    """Download 'model_step_*.pt', 'final_config.yaml' and 'model_config.yaml' for the given W&B run.
+def _download_wandb_files(
+    wandb_path_no_prefix: str,
+) -> tuple[Path, Path, Path, Path | None, Path | None]:
+    """Download core artifacts for the given W&B run.
 
-    Returns (checkpoint_path, config_path, model_config_path, ln_stds_path).
+    Returns (checkpoint_path, config_path, model_config_path, ln_stds_path, tokenizer_path).
     """
     slug = _wandb_slug(wandb_path_no_prefix)
     cache_dir = _cache_dir_for_slug(slug)
@@ -62,6 +66,12 @@ def _download_wandb_files(wandb_path_no_prefix: str) -> tuple[Path, Path, Path, 
             ln_stds_file = f
             break
 
+    tokenizer_file = None
+    for f in files:
+        if f.name.endswith("tokenizer.json"):
+            tokenizer_file = f
+            break
+
     # Locate latest checkpoint by step number
     step_re = re.compile(r"^model_step_(\d+)\.pt$")
     ckpt_candidates: list[tuple[int, Any]] = []
@@ -81,12 +91,15 @@ def _download_wandb_files(wandb_path_no_prefix: str) -> tuple[Path, Path, Path, 
     latest_ckpt_file.download(root=str(cache_dir), replace=True)
     if ln_stds_file is not None:
         ln_stds_file.download(root=str(cache_dir), replace=True)
+    if tokenizer_file is not None:
+        tokenizer_file.download(root=str(cache_dir), replace=True)
 
     ckpt_path = cache_dir / latest_ckpt_file.name
     config_path = cache_dir / config_file.name
     model_config_path = cache_dir / model_config_file.name
     ln_stds_path = cache_dir / ln_stds_file.name if ln_stds_file is not None else None
-    return ckpt_path, config_path, model_config_path, ln_stds_path
+    tokenizer_path = cache_dir / tokenizer_file.name if tokenizer_file is not None else None
+    return ckpt_path, config_path, model_config_path, ln_stds_path, tokenizer_path
 
 
 @dataclass
@@ -101,6 +114,8 @@ class RunInfo:
     config_dict: dict[str, Any]
     model_config_dict: dict[str, Any]
     ln_stds: dict[str, float] | None
+    tokenizer_path: Path | None
+    hf_tokenizer_path: str | None
 
     @classmethod
     def from_path(cls, path: str | Path) -> RunInfo:
@@ -112,20 +127,29 @@ class RunInfo:
         # Handle W&B path
         if _is_wandb_path(path):
             wandb_path = path[len(WANDB_PATH_PREFIX) :]  # type: ignore[index]
-            ckpt_path, config_path, model_config_path, ln_stds_path = _download_wandb_files(
-                wandb_path
-            )
+            (
+                ckpt_path,
+                config_path,
+                model_config_path,
+                ln_stds_path,
+                tokenizer_path,
+            ) = _download_wandb_files(wandb_path)
         else:
             ckpt_path = Path(path)
             assert ckpt_path.is_file(), f"Expected a file, got {ckpt_path}"
-            config_path = ckpt_path.parent / "final_config.yaml"
+            # Look for configs and tokenizer in parent.parent (output_dir)
+            output_dir = ckpt_path.parent.parent
+            config_path = output_dir / "final_config.yaml"
+            model_config_path = output_dir / "model_config.yaml"
             assert config_path.exists(), (
                 f"Expected config at {config_path} next to checkpoint {ckpt_path}"
             )
-            model_config_path = ckpt_path.parent / "model_config.yaml"
             assert model_config_path.exists(), (
                 f"Expected model config at {model_config_path} next to checkpoint {ckpt_path}"
             )
+            tokenizer_path = output_dir / "tokenizer.json"
+            if not tokenizer_path.exists():
+                tokenizer_path = None
             ln_stds_path = None  # Not supported for local paths
 
         with open(config_path) as f:
@@ -140,9 +164,50 @@ class RunInfo:
         else:
             ln_stds = None
 
+        # Optional HF tokenizer reference from config
+        try:
+            hf_tok_path = config_dict["train_dataset_config"]["hf_tokenizer_path"]
+            hf_tok_path = hf_tok_path if isinstance(hf_tok_path, str) else None
+        except Exception:
+            hf_tok_path = None
+
         return cls(
             checkpoint_path=ckpt_path,
             config_dict=config_dict,
             model_config_dict=model_config_dict,
             ln_stds=ln_stds,
+            tokenizer_path=tokenizer_path,
+            hf_tokenizer_path=hf_tok_path,
         )
+
+    def load_tokenizer(self) -> HFTokenizer:
+        """Load tokenizer with simple HF/local logic like in dataloaders.py."""
+        # Prefer HF path if specified
+        if self.hf_tokenizer_path is not None:
+            return AutoTokenizer.from_pretrained(
+                self.hf_tokenizer_path,
+                add_bos_token=False,
+                unk_token="[UNK]",
+                eos_token="[EOS]",
+                bos_token=None,
+            ).backend_tokenizer
+
+        # Next, prefer tokenizer.json adjacent to outputs (downloaded from wandb or local)
+        if self.tokenizer_path is not None and self.tokenizer_path.exists():
+            return HFTokenizer.from_file(str(self.tokenizer_path))
+
+        # Finally, fall back to tokenizer_file_path from config if present
+        try:
+            tok_cfg = self.config_dict["train_dataset_config"]["tokenizer_file_path"]
+            if isinstance(tok_cfg, str):
+                p = Path(tok_cfg)
+                if p.is_file():
+                    return HFTokenizer.from_file(str(p))
+                # try in output_dir (checkpoint.parent.parent)
+                cand = self.checkpoint_path.parent.parent / p.name
+                if cand.is_file():
+                    return HFTokenizer.from_file(str(cand))
+        except Exception:
+            pass
+
+        raise FileNotFoundError("Could not resolve a tokenizer for this RunInfo")

@@ -377,6 +377,13 @@ def main(config_path_or_obj: Path | str | Config | None = None, **kwargs: Any) -
             model_config_dict=model_config.model_dump(mode="json"),
             ln_stds=ln_stds,
         )
+        # Save tokenizer to output_dir alongside configs and upload to W&B if enabled
+        tokenizer_file = output_dir / "tokenizer.json"
+        train_tokenizer.save(str(tokenizer_file))
+        print0(f"Saved tokenizer to {tokenizer_file}")
+        if config.wandb_project is not None and master_process:
+            wandb.save(str(tokenizer_file), policy="now", base_path=output_dir)
+            print0(f"Saved tokenizer to wandb from {str(tokenizer_file)}")
         checkpoints_dir = output_dir / "checkpoints"
         checkpoints_dir.mkdir(parents=True, exist_ok=True)
         if config.intermediate_checkpoints:

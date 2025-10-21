@@ -22,7 +22,7 @@ val_dataset_config:
 model_id: gpt2_simple-1.25M
 dtype: float32 # Without this, non-flash attention will cause divergence
 # 1 GPU
-batch_size: 64
+batch_size: 16
 total_batch_size: 32768 # 64 * 512
 num_iterations: 100_000 # custom iterations, reload the train loader if we exhaust data
 warmup_iters: 600
