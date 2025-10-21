@@ -80,8 +80,8 @@ class CausalSelfAttention(nn.Module):
         self.k_proj = nn.Linear(config.n_embd, config.n_embd)
         self.v_proj = nn.Linear(config.n_embd, config.n_embd)
         # output projection
-        self.c_proj = nn.Linear(config.n_embd, config.n_embd)
-        self.c_proj.LLMC_RESIDUAL_SCALE_FLAG = True  # type: ignore
+        self.o_proj = nn.Linear(config.n_embd, config.n_embd)
+        self.o_proj.LLMC_RESIDUAL_SCALE_FLAG = True  # type: ignore
         # not really a 'bias', more of a mask, but following the OpenAI/HF naming though
         self.register_buffer(
             "bias",
@@ -120,7 +120,7 @@ class CausalSelfAttention(nn.Module):
         y = (
             y.transpose(1, 2).contiguous().view(B, T, C)
         )  # re-assemble all head outputs side by side
-        y = self.c_proj(y)
+        y = self.o_proj(y)
         return y
 
 
@@ -129,13 +129,13 @@ class MLP(nn.Module):
         super().__init__()
         self.c_fc = nn.Linear(config.n_embd, 4 * config.n_embd)
         self.gelu = NewGELU()
-        self.c_proj = nn.Linear(4 * config.n_embd, config.n_embd)
-        self.c_proj.LLMC_RESIDUAL_SCALE_FLAG = True  # type: ignore
+        self.down_proj = nn.Linear(4 * config.n_embd, config.n_embd)
+        self.down_proj.LLMC_RESIDUAL_SCALE_FLAG = True  # type: ignore
 
     def forward(self, x: Float[Tensor, "... dim"]) -> Float[Tensor, "... dim"]:
         x = self.c_fc(x)
         x = self.gelu(x)
-        x = self.c_proj(x)
+        x = self.down_proj(x)
         return x
 
 

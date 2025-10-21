@@ -58,12 +58,12 @@ class CausalSelfAttention(nn.Module):
         self.n_ctx = config.n_ctx  # Max context length for precomputation
         self.flash_attention = config.flash_attention
         if self.use_grouped_query_attention:
-            self.q_attn = nn.Linear(config.n_embd, config.n_embd, bias=config.attn_bias)
+            self.q_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.attn_bias)
             ########### NEW CODE ###########
-            self.k_attn = nn.Linear(
+            self.k_proj = nn.Linear(
                 config.n_embd, self.n_key_value_heads * self.head_dim, bias=config.attn_bias
             )
-            self.v_attn = nn.Linear(
+            self.v_proj = nn.Linear(
                 config.n_embd, self.n_key_value_heads * self.head_dim, bias=config.attn_bias
             )
             ########### END NEW CODE ###########
@@ -75,8 +75,8 @@ class CausalSelfAttention(nn.Module):
         else:
             self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd, bias=config.attn_bias)
 
-        self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.attn_bias)
-        self.c_proj.LLMC_RESIDUAL_SCALE_FLAG = True  # type: ignore
+        self.o_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.attn_bias)
+        self.o_proj.LLMC_RESIDUAL_SCALE_FLAG = True  # type: ignore
 
         self.register_buffer(
             "bias",
@@ -182,10 +182,10 @@ class CausalSelfAttention(nn.Module):
         B, T, C = x.size()  # Batch size, Sequence length, Embedding dimension
 
         if self.use_grouped_query_attention:
-            q = self.q_attn(x)  # (B, T, C)
+            q = self.q_proj(x)  # (B, T, C)
             ########### NEW CODE ###########
-            k = self.k_attn(x)  # (B, T, n_kv_heads * head_dim)
-            v = self.v_attn(x)  # (B, T, n_kv_heads * head_dim)
+            k = self.k_proj(x)  # (B, T, n_kv_heads * head_dim)
+            v = self.v_proj(x)  # (B, T, n_kv_heads * head_dim)
             ########### END NEW CODE ###########
             ########### OLD CODE ###########
             # Split K and V
@@ -249,7 +249,7 @@ class CausalSelfAttention(nn.Module):
             y = att @ v  # (B, n_head, T, head_dim)
 
         y = y.transpose(1, 2).contiguous().view(B, T, C)  # (B, T, C)
-        y = self.c_proj(y)  # (B, T, C)
+        y = self.o_proj(y)  # (B, T, C)
 
         return y
 
