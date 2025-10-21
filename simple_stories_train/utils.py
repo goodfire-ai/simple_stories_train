@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 from typing import Any, TypeVar
@@ -27,7 +28,10 @@ def is_checkpoint_step(step: int) -> bool:
 
 
 def save_configs(
-    save_dir: Path, config_dict: dict[str, Any], model_config_dict: dict[str, Any]
+    save_dir: Path,
+    config_dict: dict[str, Any],
+    model_config_dict: dict[str, Any],
+    ln_stds: dict[str, float] | None = None,
 ) -> None:
     config_file = save_dir / "final_config.yaml"
     with open(config_file, "w") as f:
@@ -37,12 +41,22 @@ def save_configs(
     with open(model_config_file, "w") as f:
         yaml.dump(model_config_dict, f)
     print0(f"Saved model config to {model_config_file}")
+    ln_stds_file = None
+    if ln_stds is not None:
+        ln_stds_file = save_dir / "ln-stds.json"
+        with open(ln_stds_file, "w") as f:
+            json.dump(ln_stds, f)
+        print0(f"Saved ln stds to {ln_stds_file}")
 
     if config_dict.get("wandb_project"):
         wandb.save(str(config_file), policy="now", base_path=save_dir)
         print0(f"Saved config to wandb from {str(config_file)}")
         wandb.save(str(model_config_file), policy="now", base_path=save_dir)
         print0(f"Saved model config to wandb from {str(model_config_file)}")
+        if ln_stds is not None:
+            assert ln_stds_file is not None
+            wandb.save(str(ln_stds_file), policy="now", base_path=save_dir)
+            print0(f"Saved ln stds to wandb from {str(ln_stds_file)}")
 
 
 def save_model(
