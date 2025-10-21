@@ -182,6 +182,9 @@ class RunInfo:
 
     def load_tokenizer(self) -> HFTokenizer:
         """Load tokenizer with simple HF/local logic like in dataloaders.py."""
+        assert self.hf_tokenizer_path is not None or self.tokenizer_path is not None, (
+            "Either hf_tokenizer_path or tokenizer_path must be specified"
+        )
         # Prefer HF path if specified
         if self.hf_tokenizer_path is not None:
             return AutoTokenizer.from_pretrained(
@@ -195,19 +198,5 @@ class RunInfo:
         # Next, prefer tokenizer.json adjacent to outputs (downloaded from wandb or local)
         if self.tokenizer_path is not None and self.tokenizer_path.exists():
             return HFTokenizer.from_file(str(self.tokenizer_path))
-
-        # Finally, fall back to tokenizer_file_path from config if present
-        try:
-            tok_cfg = self.config_dict["train_dataset_config"]["tokenizer_file_path"]
-            if isinstance(tok_cfg, str):
-                p = Path(tok_cfg)
-                if p.is_file():
-                    return HFTokenizer.from_file(str(p))
-                # try in output_dir (checkpoint.parent.parent)
-                cand = self.checkpoint_path.parent.parent / p.name
-                if cand.is_file():
-                    return HFTokenizer.from_file(str(cand))
-        except Exception:
-            pass
 
         raise FileNotFoundError("Could not resolve a tokenizer for this RunInfo")
