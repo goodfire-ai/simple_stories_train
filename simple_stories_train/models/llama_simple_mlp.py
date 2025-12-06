@@ -22,7 +22,7 @@ from simple_stories_train.utils import print0
 # pyright: reportAttributeAccessIssue=false, reportIndexIssue=false
 
 
-class LlamaSimpleMlpConfig(BaseModel):
+class LlamaSimpleMLPConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     block_size: int = 1024
     vocab_size: int = 50257
@@ -49,7 +49,7 @@ class CausalSelfAttention(nn.Module):
     rotary_sin: Tensor
     rotary_cos: Tensor
 
-    def __init__(self, config: LlamaSimpleMlpConfig):
+    def __init__(self, config: LlamaSimpleMLPConfig):
         super().__init__()
         assert config.n_embd % config.n_head == 0
         self.use_grouped_query_attention = config.use_grouped_query_attention
@@ -260,7 +260,7 @@ class NewGELU(nn.Module):
 
 
 class MLP(nn.Module):
-    def __init__(self, config: LlamaSimpleMlpConfig):
+    def __init__(self, config: LlamaSimpleMLPConfig):
         super().__init__()
         self.c_fc = nn.Linear(config.n_embd, config.n_intermediate, bias=config.mlp_bias)
         self.gelu = NewGELU()
@@ -295,7 +295,7 @@ class LlamaRMSNorm(nn.Module):
 
 
 class Block(nn.Module):
-    def __init__(self, config: LlamaSimpleMlpConfig):
+    def __init__(self, config: LlamaSimpleMLPConfig):
         super().__init__()
         self.rms_1 = LlamaRMSNorm(config.n_embd, eps=config.rms_norm_eps)
         self.attn = CausalSelfAttention(config)
@@ -308,8 +308,8 @@ class Block(nn.Module):
         return x
 
 
-class LlamaSimpleMlp(nn.Module):
-    def __init__(self, config: LlamaSimpleMlpConfig):
+class LlamaSimpleMLP(nn.Module):
+    def __init__(self, config: LlamaSimpleMLPConfig):
         super().__init__()
         self.config = config
         self.wte: nn.Embedding = nn.Embedding(config.vocab_size, config.n_embd)
@@ -368,16 +368,16 @@ class LlamaSimpleMlp(nn.Module):
         return logits, loss
 
     @classmethod
-    def from_run_info(cls, run_info: RunInfo) -> "LlamaSimpleMlp":
-        """Create a LlamaSimpleMlp model from a RunInfo, loading weights from its checkpoint."""
-        model = cls(LlamaSimpleMlpConfig(**run_info.model_config_dict))
+    def from_run_info(cls, run_info: RunInfo) -> "LlamaSimpleMLP":
+        """Create a LlamaSimpleMLP model from a RunInfo, loading weights from its checkpoint."""
+        model = cls(LlamaSimpleMLPConfig(**run_info.model_config_dict))
         state_dict = torch.load(run_info.checkpoint_path, map_location="cpu", weights_only=True)
         model.load_state_dict(state_dict, strict=True)
         return model
 
     @classmethod
-    def from_pretrained(cls, model_path: str | Path) -> "LlamaSimpleMlp":
-        """Create a LlamaSimpleMlp model from a wandb string or a local path.
+    def from_pretrained(cls, model_path: str | Path) -> "LlamaSimpleMLP":
+        """Create a LlamaSimpleMLP model from a wandb string or a local path.
 
         Args:
             model_path:

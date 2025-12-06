@@ -2,7 +2,7 @@ from simple_stories_train.models.gpt2 import GPT2Config
 from simple_stories_train.models.gpt2_simple import GPT2SimpleConfig
 from simple_stories_train.models.llama import LlamaConfig
 from simple_stories_train.models.llama_simple import LlamaSimpleConfig
-from simple_stories_train.models.llama_simple_mlp import LlamaSimpleMlpConfig
+from simple_stories_train.models.llama_simple_mlp import LlamaSimpleMLPConfig
 
 MODEL_CONFIGS = {
     # Llama debug/dev sizes
@@ -186,8 +186,8 @@ MODEL_CONFIGS = {
         n_key_value_heads=2,
         flash_attention=False,
     ),
-    # LlamaSimpleMlp presets (GELU MLP instead of SwiGLU)
-    "llama_simple_mlp-1.25M": LlamaSimpleMlpConfig(
+    # LlamaSimpleMLP presets (GELU MLP instead of SwiGLU)
+    "llama_simple_mlp-1.25M": LlamaSimpleMLPConfig(
         block_size=512,
         vocab_size=4019,
         n_layer=4,
@@ -199,7 +199,7 @@ MODEL_CONFIGS = {
         n_key_value_heads=2,
         flash_attention=False,
     ),
-    "llama_simple_mlp-1L": LlamaSimpleMlpConfig(
+    "llama_simple_mlp-1L": LlamaSimpleMLPConfig(
         block_size=512,
         vocab_size=4019,
         n_layer=1,
@@ -211,7 +211,7 @@ MODEL_CONFIGS = {
         n_key_value_heads=2,
         flash_attention=False,
     ),
-    "llama_simple_mlp-2L": LlamaSimpleMlpConfig(
+    "llama_simple_mlp-2L": LlamaSimpleMLPConfig(
         block_size=512,
         vocab_size=4019,
         n_layer=2,
