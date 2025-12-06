@@ -19,10 +19,16 @@ val_dataset_config:
   column_name: story
 # model_id: llama-1.25M
 # model_id: llama_simple-1.25M
-model_id: gpt2_simple-1.25M
+# model_id: gpt2_simple-1.25M
+# model_id: gpt2_simple-1L
+# model_id: gpt2_simple-2L
+# model_id: llama_simple_mlp-2L
+model_id: llama_simple_mlp-1.25M
+# model_id: llama_simple-2L
 dtype: float32 # Without this, non-flash attention will cause divergence
 # 1 GPU
-batch_size: 16
+# batch_size: 64 # 1 GPU
+batch_size: 8 # 8 GPUs
 total_batch_size: 32768 # 64 * 512
 num_iterations: 100_000 # custom iterations, reload the train loader if we exhaust data
 warmup_iters: 600
@@ -38,6 +44,7 @@ intermediate_checkpoints: false
 
 # For finetuning (and ablating LN stds)
 # from_pretrained: "wandb:goodfire/spd/runs/syhzse3u"
+# from_pretrained: "wandb:goodfire/spd/runs/bgljjlot"
 # num_iterations: 9000
 # enable_ln_ablation: true
 # n_steps_between_ln_ablation: 500

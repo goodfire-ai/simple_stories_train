@@ -2,6 +2,7 @@ from simple_stories_train.models.gpt2 import GPT2Config
 from simple_stories_train.models.gpt2_simple import GPT2SimpleConfig
 from simple_stories_train.models.llama import LlamaConfig
 from simple_stories_train.models.llama_simple import LlamaSimpleConfig
+from simple_stories_train.models.llama_simple_mlp import LlamaSimpleMlpConfig
 
 MODEL_CONFIGS = {
     # Llama debug/dev sizes
@@ -133,6 +134,22 @@ MODEL_CONFIGS = {
         n_embd=128,
         flash_attention=False,
     ),
+    "gpt2_simple-1L": GPT2SimpleConfig(
+        block_size=512,
+        vocab_size=4019,
+        n_layer=1,
+        n_head=4,
+        n_embd=128,
+        flash_attention=False,
+    ),
+    "gpt2_simple-2L": GPT2SimpleConfig(
+        block_size=512,
+        vocab_size=4019,
+        n_layer=2,
+        n_head=4,
+        n_embd=128,
+        flash_attention=False,
+    ),
     "llama_simple-1.25M": LlamaSimpleConfig(
         block_size=512,
         vocab_size=4019,
@@ -140,6 +157,67 @@ MODEL_CONFIGS = {
         n_head=4,
         n_embd=128,
         n_intermediate=128 * 4 * 2 // 3,
+        rotary_dim=128 // 4,
+        n_ctx=512,
+        n_key_value_heads=2,
+        flash_attention=False,
+    ),
+    "llama_simple-1L": LlamaSimpleConfig(
+        block_size=512,
+        vocab_size=4019,
+        n_layer=1,
+        n_head=4,
+        n_embd=128,
+        n_intermediate=128 * 4 * 2 // 3,
+        rotary_dim=128 // 4,
+        n_ctx=512,
+        n_key_value_heads=2,
+        flash_attention=False,
+    ),
+    "llama_simple-2L": LlamaSimpleConfig(
+        block_size=512,
+        vocab_size=4019,
+        n_layer=2,
+        n_head=4,
+        n_embd=128,
+        n_intermediate=128 * 4 * 2 // 3,
+        rotary_dim=128 // 4,
+        n_ctx=512,
+        n_key_value_heads=2,
+        flash_attention=False,
+    ),
+    # LlamaSimpleMlp presets (GELU MLP instead of SwiGLU)
+    "llama_simple_mlp-1.25M": LlamaSimpleMlpConfig(
+        block_size=512,
+        vocab_size=4019,
+        n_layer=4,
+        n_head=4,
+        n_embd=128,
+        n_intermediate=128 * 4,
+        rotary_dim=128 // 4,
+        n_ctx=512,
+        n_key_value_heads=2,
+        flash_attention=False,
+    ),
+    "llama_simple_mlp-1L": LlamaSimpleMlpConfig(
+        block_size=512,
+        vocab_size=4019,
+        n_layer=1,
+        n_head=4,
+        n_embd=128,
+        n_intermediate=128 * 4,
+        rotary_dim=128 // 4,
+        n_ctx=512,
+        n_key_value_heads=2,
+        flash_attention=False,
+    ),
+    "llama_simple_mlp-2L": LlamaSimpleMlpConfig(
+        block_size=512,
+        vocab_size=4019,
+        n_layer=2,
+        n_head=4,
+        n_embd=128,
+        n_intermediate=128 * 4,
         rotary_dim=128 // 4,
         n_ctx=512,
         n_key_value_heads=2,

@@ -54,6 +54,7 @@ from simple_stories_train.models.gpt2 import GPT2
 from simple_stories_train.models.gpt2_simple import GPT2Simple
 from simple_stories_train.models.llama import Llama
 from simple_stories_train.models.llama_simple import LlamaSimple
+from simple_stories_train.models.llama_simple_mlp import LlamaSimpleMlp
 from simple_stories_train.models.model_configs import MODEL_CONFIGS
 from simple_stories_train.run_info import RunInfo
 from simple_stories_train.utils import (
@@ -70,6 +71,7 @@ from simple_stories_train.utils import (
 FAMILY_TO_MODEL: dict[str, type[nn.Module]] = {
     "llama": Llama,
     "llama_simple": LlamaSimple,
+    "llama_simple_mlp": LlamaSimpleMlp,
     "gpt2": GPT2,
     "gpt2_simple": GPT2Simple,
 }
