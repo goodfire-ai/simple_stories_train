@@ -32,11 +32,20 @@ class DatasetConfig(BaseModel):
     for datasets tokenized in TransformerLens (e.g. NeelNanda/pile-10k)."""
 
 
-def _keep_single_column(dataset: Dataset, col_name: str) -> Dataset:
+def _keep_single_column(dataset: Dataset | IterableDataset, col_name: str) -> Dataset | IterableDataset:
     """
     Acts on a HuggingFace dataset to delete all columns apart from a single column name - useful
     when we want to tokenize and mix together different strings.
     """
+    # For IterableDataset with features=None (streaming datasets), we can't iterate over features.
+    # However, we don't need to pre-filter columns since the map() function with remove_columns
+    # will handle this properly.
+    if isinstance(dataset, IterableDataset) and dataset.features is None:
+        # Skip column filtering for streaming datasets without features
+        # The map() function will handle column management via remove_columns parameter
+        return dataset
+
+    # For regular datasets or IterableDatasets with features, remove unwanted columns
     for key in dataset.features:  # pyright: ignore[reportAttributeAccessIssue]
         if key != col_name:
             dataset = dataset.remove_columns(key)
@@ -44,14 +53,14 @@ def _keep_single_column(dataset: Dataset, col_name: str) -> Dataset:
 
 
 def tokenize_and_concatenate(
-    dataset: Dataset,
+    dataset: Dataset | IterableDataset,
     tokenizer: Tokenizer,
     max_length: int = 1024,
     column_name: str = "story",
     add_bos_token: bool = False,
     num_proc: int = 10,
     to_lower: bool = True,
-) -> Dataset:
+) -> Dataset | IterableDataset:
     """Helper function to tokenizer and concatenate a dataset of text. This converts the text to
     tokens, concatenates them (separated by EOS tokens) and then reshapes them into a 2D array of
     shape (____, sequence_length), dropping the last batch. Tokenizers are much faster if
