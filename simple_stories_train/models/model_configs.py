@@ -223,8 +223,7 @@ MODEL_CONFIGS = {
         n_key_value_heads=2,
         flash_attention=False,
     ),
-    # GPT-2 Simple presets for Pile dataset (GPT-2 tokenizer + [UNK] + [EOS] = 50259 vocab)
-    # Same architecture as SimpleStories versions, just with larger vocab
+    # GPT-2 Simple presets for Pile dataset (GPT-2 tokenizer + [UNK]/[EOS] = 50259 vocab)
     "gpt2_simple-pile": GPT2SimpleConfig(
         block_size=512,
         vocab_size=50259,
