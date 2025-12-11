@@ -223,6 +223,7 @@ def create_data_loader(
             dataset,  # type: ignore
             tokenizer,
             max_length=dataset_config.n_ctx,
+            column_name=dataset_config.column_name,
             add_bos_token=False,
         )
 
