@@ -1,0 +1,42 @@
+wandb_project: spd
+train_dataset_config:
+  name: monology/pile-uncopyrighted
+  is_tokenized: false
+  tokenizer_file_path: null
+  hf_tokenizer_path: gpt2
+  split: train
+  streaming: true  # Required for Pile (very large dataset)
+  n_ctx: 512
+  seed: 0
+  column_name: text
+val_dataset_config:
+  # Use NeelNanda/pile-10k for validation (smaller, faster)
+  name: NeelNanda/pile-10k
+  is_tokenized: false
+  tokenizer_file_path: null
+  hf_tokenizer_path: gpt2
+  split: train
+  streaming: false
+  n_ctx: 512
+  seed: 0
+  column_name: text
+
+model_id: gpt2_simple-pile
+dtype: float32  # Without this, non-flash attention will cause divergence
+batch_size: 8  # 8 GPUs
+total_batch_size: 32768  # 8 * 512 * grad_accum_steps
+num_iterations: 100000
+warmup_iters: 600
+
+learning_rate: 1e-4
+learning_rate_decay_frac: 0.1
+weight_decay: 0.1
+grad_clip: 1.0
+val_loss_every: 100
+val_max_steps: 20
+sample_every: 1000
+intermediate_checkpoints: false
+
+compile: true
+flash_attention: false
+tensorcores: true
