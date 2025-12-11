@@ -18,6 +18,7 @@ dependencies = [
     "transformers",
     "datasets",
     "python-dotenv",
+    "zstandard",  # Required for Pile dataset (zstd compression)
 ]
 
 [project.optional-dependencies]
