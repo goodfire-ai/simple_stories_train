@@ -65,13 +65,13 @@ python scripts/slurm_train.py --config simple_stories_train/train_config.yaml --
 python scripts/slurm_train.py --config simple_stories_train/train_config.yaml --n_gpus 16 --submit
 
 # Custom partition and time limit
-python scripts/slurm_train.py --config simple_stories_train/train_config.yaml --partition gpu --time 24:00:00 --submit
+python scripts/slurm_train.py --config simple_stories_train/train_config.yaml --partition h200-dev --time 24:00:00 --submit
 ```
 
 Options:
 - `--config`: Path to training config YAML (required)
 - `--n_gpus`: Number of GPUs (default: 8). Values >8 trigger multi-node DDP.
-- `--partition`: SLURM partition name (default: 'gpu')
+- `--partition`: SLURM partition name (default: 'h200-reserved-default')
 - `--time`: Job time limit in HH:MM:SS (default: '72:00:00')
 - `--job_name`: Custom job name (default: auto-generated from config)
 - `--submit`: Actually submit the job (default: just generate script)
