@@ -171,7 +171,7 @@ echo "========================================"
 def main(
     config: str,
     n_gpus: int = 8,
-    partition: str = "gpu",
+    partition: str = "h200-reserved-default",
     time: str = "72:00:00",
     job_name: str | None = None,
     submit: bool = False,
@@ -182,7 +182,7 @@ def main(
     Args:
         config: Path to training config YAML file (required)
         n_gpus: Number of GPUs to use (default: 8)
-        partition: SLURM partition (default: 'gpu')
+        partition: SLURM partition (default: 'h200-reserved-default')
         time: Time limit in HH:MM:SS format (default: '72:00:00')
         job_name: Optional job name (default: auto-generated from config)
         submit: If True, submit the job via sbatch (default: False)
