@@ -25,7 +25,7 @@ model_id: gpt2_simple-pile
 dtype: float32  # Without this, non-flash attention will cause divergence
 batch_size: 8  # 8 GPUs
 total_batch_size: 32768  # 8 * 512 * grad_accum_steps
-num_iterations: 100_000
+num_iterations: 1_000_000
 warmup_iters: 600
 
 learning_rate: 1e-4
@@ -35,7 +35,7 @@ grad_clip: 1.0
 val_loss_every: 100
 val_max_steps: 20
 sample_every: 1000
-intermediate_checkpoints: false
+intermediate_checkpoints: true
 
 compile: true
 flash_attention: false
