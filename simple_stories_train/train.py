@@ -317,6 +317,7 @@ def main(config_path_or_obj: Path | str | Config | None = None, **kwargs: Any) -
         global_seed=0,
         ddp_rank=ddp_rank,
         ddp_world_size=ddp_world_size,
+        split_for_ddp=False,  # Don't split validation data - all ranks evaluate same data
     )
 
     # logging

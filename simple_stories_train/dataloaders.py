@@ -163,6 +163,7 @@ def create_data_loader(
     global_seed: int = 0,
     ddp_rank: int = 0,
     ddp_world_size: int = 1,
+    split_for_ddp: bool = True,
 ) -> tuple[DataLoader[Any], Tokenizer]:
     """Create a DataLoader for the given dataset.
 
@@ -173,6 +174,8 @@ def create_data_loader(
         global_seed: Used for shuffling if dataset_config.seed is None.
         ddp_rank: The rank of the current process in DDP.
         ddp_world_size: The world size in DDP.
+        split_for_ddp: If True, split the dataset across DDP ranks. Set to False for
+            validation datasets where you want all ranks to see the same data.
 
     Returns:
         A tuple of the DataLoader and the tokenizer.
@@ -189,7 +192,8 @@ def create_data_loader(
         dataset = dataset.shuffle(seed=seed, buffer_size=buffer_size)
     else:
         dataset = dataset.shuffle(seed=seed)
-    dataset = split_dataset_by_node(dataset, ddp_rank, ddp_world_size)  # type: ignore
+    if split_for_ddp:
+        dataset = split_dataset_by_node(dataset, ddp_rank, ddp_world_size)  # type: ignore
 
     # Load tokenizer based on config
     if dataset_config.hf_tokenizer_path is not None:
