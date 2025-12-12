@@ -171,3 +171,7 @@ cython_debug/
 #.idea/
 
 logs/
+
+# SLURM generated files
+slurm_scripts/
+slurm_logs/

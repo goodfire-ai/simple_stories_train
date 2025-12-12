@@ -50,6 +50,34 @@ torchrun --standalone --nproc_per_node=N -m simple_stories_train.train ...
 ```
 where `N` is the number of GPUs to use.
 
+### SLURM Cluster Submission
+
+To submit training jobs to a SLURM cluster:
+
+```bash
+# Generate SLURM script (review before submitting)
+python scripts/slurm_train.py --config simple_stories_train/train_config.yaml
+
+# Generate and submit (8 GPUs, single node)
+python scripts/slurm_train.py --config simple_stories_train/train_config.yaml --n_gpus 8 --submit
+
+# Multi-node training (16 GPUs = 2 nodes × 8 GPUs)
+python scripts/slurm_train.py --config simple_stories_train/train_config.yaml --n_gpus 16 --submit
+
+# Custom partition and time limit
+python scripts/slurm_train.py --config simple_stories_train/train_config.yaml --partition gpu --time 24:00:00 --submit
+```
+
+Options:
+- `--config`: Path to training config YAML (required)
+- `--n_gpus`: Number of GPUs (default: 8). Values >8 trigger multi-node DDP.
+- `--partition`: SLURM partition name (default: 'gpu')
+- `--time`: Job time limit in HH:MM:SS (default: '72:00:00')
+- `--job_name`: Custom job name (default: auto-generated from config)
+- `--submit`: Actually submit the job (default: just generate script)
+
+Generated scripts are saved to `slurm_scripts/` and logs to `slurm_logs/`.
+
 ### Logging with Weights & Biases
 To track training with Weights & Biases, you can set the WANDB_PROJECT and WANDB_API_KEY variables in
 `.env`. API keys can be obtained from your [Weights & Biases account settings](https://wandb.ai/settings).
