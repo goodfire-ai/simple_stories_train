@@ -223,4 +223,16 @@ MODEL_CONFIGS = {
         n_key_value_heads=2,
         flash_attention=False,
     ),
+    "llama_simple_mlp-2L-wide": LlamaSimpleMLPConfig(
+        block_size=512,
+        vocab_size=4019,
+        n_layer=2,
+        n_head=6,
+        n_embd=192,
+        n_intermediate=192 * 4,
+        rotary_dim=192 // 6,
+        n_ctx=512,
+        n_key_value_heads=3,
+        flash_attention=False,
+    )
 }
