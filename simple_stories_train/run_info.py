@@ -86,13 +86,14 @@ def _download_wandb_files(
     ckpt_candidates.sort(key=lambda t: t[0])
     _, latest_ckpt_file = ckpt_candidates[-1]
 
-    config_file.download(root=str(cache_dir), replace=True)
-    model_config_file.download(root=str(cache_dir), replace=True)
-    latest_ckpt_file.download(root=str(cache_dir), replace=True)
+    # Skip download if file already exists to avoid race conditions in multi-process contexts
+    config_file.download(root=str(cache_dir), exist_ok=True)
+    model_config_file.download(root=str(cache_dir), exist_ok=True)
+    latest_ckpt_file.download(root=str(cache_dir), exist_ok=True)
     if ln_stds_file is not None:
-        ln_stds_file.download(root=str(cache_dir), replace=True)
+        ln_stds_file.download(root=str(cache_dir), exist_ok=True)
     if tokenizer_file is not None:
-        tokenizer_file.download(root=str(cache_dir), replace=True)
+        tokenizer_file.download(root=str(cache_dir), exist_ok=True)
 
     ckpt_path = cache_dir / latest_ckpt_file.name
     config_path = cache_dir / config_file.name
