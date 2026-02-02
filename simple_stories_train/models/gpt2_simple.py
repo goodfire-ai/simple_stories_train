@@ -7,23 +7,24 @@ to be used directly with the simple_stories_train library.
 import inspect
 import math
 from pathlib import Path
+from typing import Literal
 
 import torch
 import torch.nn as nn
 from jaxtyping import Float, Int
-from pydantic import BaseModel, ConfigDict
 from torch import Tensor
 from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch.nn import functional as F
 
+from simple_stories_train.base_config import BaseConfig
 from simple_stories_train.run_info import RunInfo
 from simple_stories_train.utils import print0
 
 # pyright: reportAttributeAccessIssue=false, reportIndexIssue=false
 
 
-class GPT2SimpleConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+class GPT2SimpleConfig(BaseConfig):
+    model_type: Literal["GPT2Simple"]
     block_size: int = 1024
     vocab_size: int = 50257
     n_layer: int = 12

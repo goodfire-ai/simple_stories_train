@@ -5,10 +5,11 @@ import torch
 from datasets import Dataset, IterableDataset, load_dataset
 from datasets.distributed import split_dataset_by_node
 from numpy.typing import NDArray
-from pydantic import BaseModel, ConfigDict
 from tokenizers import Tokenizer
 from torch.utils.data import DataLoader
 from transformers import AutoTokenizer
+
+from simple_stories_train.base_config import BaseConfig
 
 """
 The bulk of this file is copied from https://github.com/ApolloResearch/e2e_sae
@@ -16,8 +17,7 @@ licensed under MIT, (c) 2024 ApolloResearch.
 """
 
 
-class DatasetConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+class DatasetConfig(BaseConfig):
     name: str = "SimpleStories/SimpleStories"
     is_tokenized: bool = True
     tokenizer_file_path: str | None = "simple_stories_train/tokenizer/simplestories-tokenizer.json"
@@ -48,6 +48,7 @@ def _keep_single_column(
         return dataset
 
     # For regular datasets or IterableDatasets with features, remove unwanted columns
+    assert dataset.features is not None
     for key in dataset.features:  # pyright: ignore[reportAttributeAccessIssue]
         if key != col_name:
             dataset = dataset.remove_columns(key)

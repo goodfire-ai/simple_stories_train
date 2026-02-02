@@ -32,9 +32,12 @@ dev = [
 requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
 
+[project.scripts]
+sst-train = "scripts.deploy:main"
+
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["simple_stories_train*"]
+include = ["simple_stories_train*", "scripts"]
 
 
 [tool.ruff]

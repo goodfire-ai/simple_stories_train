@@ -3,10 +3,10 @@ Unified training script for multiple model families (Llama, GPT-2).
 
 Usage:
 ```bash
-python -m simple_stories_train.train [PATH/TO/CONFIG.yaml] [--key1 value1 --key2 value2 ...]
+python -m simple_stories_train.train [CONFIG.yaml] [--key1 value1 --key2 value2 ...]
 ```
-- PATH/TO/CONFIG.yaml contains the training config. If no path is provided, a default config will be used.
-- Override values with dotted notation for nested keys (e.g., --train_dataset_config.name my_dataset).
+- CONFIG.yaml contains the training config. If not provided, a default config is used.
+- Override values with dotted notation (e.g., --train_dataset_config.name my_dataset).
 
 To run on multiple GPUs:
 ```bash
@@ -22,7 +22,7 @@ import warnings
 from contextlib import nullcontext
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal, Self, cast
+from typing import Any, Literal, cast
 
 import fire
 import numpy as np
@@ -33,29 +33,22 @@ import torch.nn as nn
 import wandb
 from dotenv import load_dotenv
 from pydantic import (
-    BaseModel,
-    ConfigDict,
     Field,
     NonNegativeFloat,
     NonNegativeInt,
     PositiveFloat,
     PositiveInt,
-    model_validator,
 )
 from torch.distributed import destroy_process_group, init_process_group
 from torch.nn.parallel import DistributedDataParallel as DDP
 
+from simple_stories_train.base_config import BaseConfig
 from simple_stories_train.dataloaders import DatasetConfig, create_data_loader
 from simple_stories_train.ln_free import (
     build_paper_order_paths,
     set_ln_std_at_path,
 )
-from simple_stories_train.models.gpt2 import GPT2
-from simple_stories_train.models.gpt2_simple import GPT2Simple
-from simple_stories_train.models.llama import Llama
-from simple_stories_train.models.llama_simple import LlamaSimple
-from simple_stories_train.models.llama_simple_mlp import LlamaSimpleMLP
-from simple_stories_train.models.model_configs import MODEL_CONFIGS
+from simple_stories_train.models import MODEL_CLASSES, ModelConfig
 from simple_stories_train.run_info import RunInfo
 from simple_stories_train.utils import (
     REPO_ROOT,
@@ -68,17 +61,8 @@ from simple_stories_train.utils import (
     save_model,
 )
 
-FAMILY_TO_MODEL: dict[str, type[nn.Module]] = {
-    "llama": Llama,
-    "llama_simple": LlamaSimple,
-    "llama_simple_mlp": LlamaSimpleMLP,
-    "gpt2": GPT2,
-    "gpt2_simple": GPT2Simple,
-}
 
-
-class Config(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+class Config(BaseConfig):
     wandb_project: str | None = Field(
         None, description="WandB project name. If None, will not use WandB."
     )
@@ -111,10 +95,8 @@ class Config(BaseModel):
     output_dir: Path = Field(
         REPO_ROOT / "out", description="Directory to write logs and checkpoints"
     )
-    model_id: str = Field(
-        "llama-d2",
-        description=f"Model to train (one of {tuple(MODEL_CONFIGS.keys())}).",
-    )
+    # Model configuration (discriminated union)
+    model: ModelConfig = Field(..., description="Model configuration")
     batch_size: PositiveInt = Field(4, description="Batch size")
     total_batch_size: PositiveInt = Field(
         4096, description="Number of batch_size * sequence_length before updating gradients"
@@ -165,12 +147,6 @@ class Config(BaseModel):
     ln_ablation_max_to_remove: NonNegativeInt | None = Field(
         None, description="Optional cap on number of LN layers to replace"
     )
-
-    @model_validator(mode="after")
-    def validate_model(self) -> Self:
-        if self.model_id not in MODEL_CONFIGS:
-            raise ValueError(f"model_id {self.model_id} not in {tuple(MODEL_CONFIGS.keys())}")
-        return self
 
 
 def maybe_replace_one_ln(
@@ -243,7 +219,7 @@ def main(config_path_or_obj: Path | str | Config | None = None, **kwargs: Any) -
     # gradient accumulation
     tokens_per_fwdbwd = B * T * ddp_world_size
     assert config.total_batch_size % tokens_per_fwdbwd == 0, (
-        f"Mismatch between batch size and tokens {config.total_batch_size} % {tokens_per_fwdbwd} != 0"
+        f"Batch size mismatch: {config.total_batch_size} % {tokens_per_fwdbwd} != 0"
     )
     grad_accum_steps = config.total_batch_size // tokens_per_fwdbwd
     print0(f"total desired batch size: {config.total_batch_size}")
@@ -270,20 +246,16 @@ def main(config_path_or_obj: Path | str | Config | None = None, **kwargs: Any) -
     if config.tensorcores:
         torch.set_float32_matmul_precision("high")
 
-    # Instantiate model
-    model_config = MODEL_CONFIGS[config.model_id]
-    family = config.model_id.split("-", 1)[0]
-    if family not in FAMILY_TO_MODEL:
-        raise ValueError(f"Unknown model family {family} from model_id {config.model_id}")
-    model_ctor = FAMILY_TO_MODEL[family]
-    model: nn.Module = model_ctor(model_config)
+    # Instantiate model using discriminated union config
+    model_cls = MODEL_CLASSES[config.model.model_type]
+    model: nn.Module = model_cls(config.model)
 
     # Load pretrained weights
     if config.from_pretrained is not None:
-        assert hasattr(model_ctor, "from_pretrained"), (
-            f"Model {config.model_id} does not support from_pretrained"
+        assert hasattr(model_cls, "from_pretrained"), (
+            f"Model {config.model.model_type} does not support from_pretrained"
         )
-        pretrained_model = model_ctor.from_pretrained(config.from_pretrained)  # pyright: ignore[reportAttributeAccessIssue]
+        pretrained_model = model_cls.from_pretrained(config.from_pretrained)  # pyright: ignore[reportAttributeAccessIssue]
         model.load_state_dict(pretrained_model.state_dict())
     model.to(device)
 
@@ -323,7 +295,7 @@ def main(config_path_or_obj: Path | str | Config | None = None, **kwargs: Any) -
     # logging
     if config.wandb_project is not None and master_process:
         run = wandb.init(project=config.wandb_project, config=config.model_dump(mode="json"))
-        run.name = f"{config.model_id}-{run.name}"
+        run.name = f"{config.model.model_type}-{run.name}"
 
     # DDP wrap
     if ddp:
@@ -377,7 +349,7 @@ def main(config_path_or_obj: Path | str | Config | None = None, **kwargs: Any) -
         save_configs(
             output_dir,
             config_dict=config.model_dump(mode="json"),
-            model_config_dict=model_config.model_dump(mode="json"),
+            model_config_dict=config.model.model_dump(mode="json"),
             ln_stds=ln_stds,
         )
         # Save tokenizer to output_dir alongside configs and upload to W&B if enabled
@@ -513,8 +485,8 @@ def main(config_path_or_obj: Path | str | Config | None = None, **kwargs: Any) -
             tokens_per_second = grad_accum_steps * ddp_world_size * B * T / (t1 - t0)
             norm_str = f"norm {norm:.4f}" if norm is not None else ""
             print0(
-                f"step {step:4d}/{config.num_iterations} | train loss {lossf_value:.6f} | {norm_str} | "
-                f"lr {lr:.2e} | ({(t1 - t0) * 1000:.2f} ms | {tokens_per_second:.0f} tok/s)"
+                f"step {step:4d}/{config.num_iterations} | loss {lossf_value:.6f} | {norm_str} | "
+                f"lr {lr:.2e} | {(t1 - t0) * 1000:.2f}ms | {tokens_per_second:.0f} tok/s"
             )
         if config.wandb_project is not None and master_process:
             log_metrics(step, {"train_loss": lossf_value, "lr": lr})
