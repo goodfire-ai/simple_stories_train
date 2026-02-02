@@ -97,7 +97,9 @@ class Config(BaseConfig):
     )
     # Model configuration (discriminated union)
     model: ModelConfig = Field(..., description="Model configuration")
-    batch_size: PositiveInt = Field(4, description="Batch size")
+    batch_size: PositiveInt = Field(
+        4, description="Total batch size (divided across DDP processes)"
+    )
     num_iterations: PositiveInt = Field(50, description="Number of training steps")
     inference_only: bool = Field(False, description="If True, don't update gradients")
     learning_rate: PositiveFloat = Field(1e-4, description="Learning rate")
@@ -181,7 +183,6 @@ def main(config_path_or_obj: Path | str | Config | None = None, **kwargs: Any) -
     load_dotenv(override=True)
     config = load_config(config_path_or_obj, config_model=Config, updates=kwargs)
 
-    B = config.batch_size
     T = config.train_dataset_config.n_ctx
 
     # set up DDP (distributed data parallel). torchrun sets this env variable
@@ -211,6 +212,13 @@ def main(config_path_or_obj: Path | str | Config | None = None, **kwargs: Any) -
             elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
                 device = "mps"
     print(f"using device: {device}")
+
+    # Calculate per-process batch size from total batch size
+    assert config.batch_size % ddp_world_size == 0, (
+        f"batch_size ({config.batch_size}) must be divisible by ddp_world_size ({ddp_world_size})"
+    )
+    B = config.batch_size // ddp_world_size
+
     device_type = "cuda" if "cuda" in device else "cpu"
 
     # dtype context
