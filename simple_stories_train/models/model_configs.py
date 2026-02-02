@@ -235,6 +235,31 @@ MODEL_CONFIGS = {
         n_key_value_heads=3,
         flash_attention=False,
     ),
+    "llama_simple_mlp-4L-wide": LlamaSimpleMLPConfig(
+        block_size=512,
+        vocab_size=4019,
+        n_layer=4,
+        n_head=6,
+        n_embd=192,
+        n_intermediate=192 * 4,
+        rotary_dim=192 // 6,
+        n_ctx=512,
+        n_key_value_heads=3,
+        flash_attention=False,
+    ),
+    # LlamaSimpleMLP presets for Pile dataset (GPT-2 tokenizer + [UNK]/[EOS] = 50259 vocab)
+    "llama_simple_mlp-4L-wide-pile": LlamaSimpleMLPConfig(
+        block_size=512,
+        vocab_size=50259,
+        n_layer=4,
+        n_head=6,
+        n_embd=192,
+        n_intermediate=192 * 4,
+        rotary_dim=192 // 6,
+        n_ctx=512,
+        n_key_value_heads=3,
+        flash_attention=False,
+    ),
     # GPT-2 Simple presets for Pile dataset (GPT-2 tokenizer + [UNK]/[EOS] = 50259 vocab)
     "gpt2_simple-pile": GPT2SimpleConfig(
         block_size=512,

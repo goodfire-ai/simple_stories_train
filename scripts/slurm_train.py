@@ -30,7 +30,7 @@ REPO_ROOT = Path(__file__).parent.parent.resolve()
 GPUS_PER_NODE = 8
 
 CUDA_FLAGS = {
-    "NCCL_DEBUG": "WARN",
+    "NCCL_DEBUG": "ERROR",
     "TORCH_NCCL_ASYNC_ERROR_HANDLING": "1",
 }
 
@@ -87,7 +87,9 @@ def create_slurm_script(
         # Multi-node DDP via srun + torchrun
         n_nodes = n_gpus // GPUS_PER_NODE
         if n_gpus % GPUS_PER_NODE != 0:
-            raise ValueError(f"n_gpus ({n_gpus}) must be divisible by {GPUS_PER_NODE} for multi-node")
+            raise ValueError(
+                f"n_gpus ({n_gpus}) must be divisible by {GPUS_PER_NODE} for multi-node"
+            )
 
         torchrun_cmd = (
             f"torchrun "

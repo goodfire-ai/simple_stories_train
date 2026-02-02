@@ -32,7 +32,9 @@ class DatasetConfig(BaseModel):
     for datasets tokenized in TransformerLens (e.g. NeelNanda/pile-10k)."""
 
 
-def _keep_single_column(dataset: Dataset | IterableDataset, col_name: str) -> Dataset | IterableDataset:
+def _keep_single_column(
+    dataset: Dataset | IterableDataset, col_name: str
+) -> Dataset | IterableDataset:
     """
     Acts on a HuggingFace dataset to delete all columns apart from a single column name - useful
     when we want to tokenize and mix together different strings.
@@ -180,6 +182,20 @@ def create_data_loader(
     Returns:
         A tuple of the DataLoader and the tokenizer.
     """
+    import torch.distributed as dist
+
+    # For streaming datasets in DDP, have rank 0 initialize first to cache file metadata,
+    # then synchronize before other ranks load. This prevents race conditions.
+    if dataset_config.streaming and ddp_world_size > 1 and dist.is_initialized():
+        if ddp_rank == 0:
+            load_dataset(
+                dataset_config.name,
+                streaming=dataset_config.streaming,
+                split=dataset_config.split,
+                trust_remote_code=False,
+            )
+        dist.barrier()
+
     dataset = load_dataset(
         dataset_config.name,
         streaming=dataset_config.streaming,

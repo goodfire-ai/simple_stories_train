@@ -23,7 +23,8 @@ val_dataset_config:
 # model_id: gpt2_simple-1L
 # model_id: gpt2_simple-2L
 # model_id: llama_simple_mlp-2L
-model_id: llama_simple_mlp-1.25M
+# model_id: llama_simple_mlp-1.25M
+model_id: llama_simple_mlp-4L-wide
 # model_id: llama_simple-2L
 dtype: float32 # Without this, non-flash attention will cause divergence
 # 1 GPU

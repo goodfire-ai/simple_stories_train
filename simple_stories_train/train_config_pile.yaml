@@ -21,14 +21,14 @@ val_dataset_config:
   seed: 0
   column_name: text
 
-model_id: gpt2_simple-pile
+model_id: gpt2_simple-pile-4L
 dtype: float32  # Without this, non-flash attention will cause divergence
-batch_size: 8  # 8 GPUs
-total_batch_size: 32768  # 8 * 512 * grad_accum_steps
-num_iterations: 1_000_000
+batch_size: 16  # 8 GPUs
+total_batch_size: 65536 # 16 * 512 * ddp_world_size (8)
+num_iterations: 500_000
 warmup_iters: 600
 
-learning_rate: 1e-4
+learning_rate: 3e-4
 learning_rate_decay_frac: 0.1
 weight_decay: 0.1
 grad_clip: 1.0
