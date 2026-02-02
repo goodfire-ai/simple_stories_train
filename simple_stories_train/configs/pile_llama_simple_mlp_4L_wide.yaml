@@ -1,7 +1,6 @@
 wandb_project: spd
 dtype: float32
 batch_size: 8
-total_batch_size: 32768
 num_iterations: 100_000
 warmup_iters: 600
 learning_rate: 1e-4
@@ -31,17 +30,17 @@ train_dataset_config:
   is_tokenized: false
   tokenizer_file_path: null
   hf_tokenizer_path: gpt2
-  split: train
-  streaming: true
+  split: train[:10000000] # Dataset has 177M examples
+  streaming: false
   n_ctx: 512
   seed: 0
   column_name: text
 val_dataset_config:
-  name: NeelNanda/pile-10k
+  name: monology/pile-uncopyrighted
   is_tokenized: false
   tokenizer_file_path: null
   hf_tokenizer_path: gpt2
-  split: train
+  split: train[-100000:]
   streaming: false
   n_ctx: 512
   seed: 0

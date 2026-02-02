@@ -98,10 +98,7 @@ class Config(BaseConfig):
     # Model configuration (discriminated union)
     model: ModelConfig = Field(..., description="Model configuration")
     batch_size: PositiveInt = Field(4, description="Batch size")
-    total_batch_size: PositiveInt = Field(
-        4096, description="Number of batch_size * sequence_length before updating gradients"
-    )
-    num_iterations: PositiveInt = Field(50, description="Number of gradient accumulation steps")
+    num_iterations: PositiveInt = Field(50, description="Number of training steps")
     inference_only: bool = Field(False, description="If True, don't update gradients")
     learning_rate: PositiveFloat = Field(1e-4, description="Learning rate")
     warmup_iters: NonNegativeInt = Field(
@@ -215,15 +212,6 @@ def main(config_path_or_obj: Path | str | Config | None = None, **kwargs: Any) -
                 device = "mps"
     print(f"using device: {device}")
     device_type = "cuda" if "cuda" in device else "cpu"
-
-    # gradient accumulation
-    tokens_per_fwdbwd = B * T * ddp_world_size
-    assert config.total_batch_size % tokens_per_fwdbwd == 0, (
-        f"Batch size mismatch: {config.total_batch_size} % {tokens_per_fwdbwd} != 0"
-    )
-    grad_accum_steps = config.total_batch_size // tokens_per_fwdbwd
-    print0(f"total desired batch size: {config.total_batch_size}")
-    print0(f"=> calculated gradient accumulation steps: {grad_accum_steps}")
 
     # dtype context
     ptdtype = {
@@ -436,37 +424,24 @@ def main(config_path_or_obj: Path | str | Config | None = None, **kwargs: Any) -
                 replaced_count=replaced_count,
             )
         optimizer.zero_grad(set_to_none=True)
-        lossf = torch.tensor([0.0], device=device)
         t0 = time.time()
-        for micro_step in range(grad_accum_steps):
-            try:
-                bat = next(train_iter)["input_ids"].to(torch.long)
-            except StopIteration:
-                print0("Depleted train_loader, resetting for next epoch")
-                train_iter = iter(train_loader)
-                bat = next(train_iter)["input_ids"].to(torch.long)
+        try:
+            bat = next(train_iter)["input_ids"].to(torch.long)
+        except StopIteration:
+            print0("Depleted train_loader, resetting for next epoch")
+            train_iter = iter(train_loader)
+            bat = next(train_iter)["input_ids"].to(torch.long)
 
-            x = bat.view(B, T)[:, :-1]
-            y = bat.view(B, T)[:, 1:]
-            x, y = x.to(device), y.to(device)
-            if ddp:
-                # we want only the last micro-step to sync grads in a DDP model
-                # the official way to do this is with model.no_sync(), but that is a
-                # context manager that bloats the code, so we just toggle this variable
-                model.require_backward_grad_sync = micro_step == grad_accum_steps - 1  # type: ignore[attr-defined]
-            with ctx:
-                _, loss = model(x, y, return_logits=False)
-                # we have to scale the loss to account for gradient accumulation,
-                # because the gradients just add on each successive backward().
-                # addition of gradients corresponds to a SUM in the objective, but
-                # instead of a SUM we want MEAN, so we scale the loss here
-                loss = loss / grad_accum_steps  # type: ignore[operator]
-                lossf += loss.detach()  # type: ignore[operator]
-            if not config.inference_only:
-                loss.backward()  # type: ignore[arg-type]
+        x = bat.view(B, T)[:, :-1]
+        y = bat.view(B, T)[:, 1:]
+        x, y = x.to(device), y.to(device)
+        with ctx:
+            _, loss = model(x, y, return_logits=False)
+        if not config.inference_only:
+            loss.backward()  # type: ignore[arg-type]
         if ddp:
-            dist.all_reduce(lossf, op=dist.ReduceOp.AVG)
-        lossf_value = float(lossf.item())
+            dist.all_reduce(loss, op=dist.ReduceOp.AVG)  # type: ignore[arg-type]
+        lossf_value = float(loss.detach().item())  # type: ignore[union-attr]
         norm = None
         if config.grad_clip is not None:
             norm = torch.nn.utils.clip_grad_norm_(model.parameters(), config.grad_clip)
@@ -482,7 +457,7 @@ def main(config_path_or_obj: Path | str | Config | None = None, **kwargs: Any) -
 
         t1 = time.time()
         if step % config.train_log_every == 0:
-            tokens_per_second = grad_accum_steps * ddp_world_size * B * T / (t1 - t0)
+            tokens_per_second = ddp_world_size * B * T / (t1 - t0)
             norm_str = f"norm {norm:.4f}" if norm is not None else ""
             print0(
                 f"step {step:4d}/{config.num_iterations} | loss {lossf_value:.6f} | {norm_str} | "
