@@ -5,7 +5,7 @@ This script can be run directly or via the `sst-train` command after installing 
 
 Usage:
     # Submit to SLURM
-    sst-train --config_path configs/llama_simple_mlp_4L_wide.yaml
+    sst-train --config_path simple_stories_train/configs/pile_llama_simple_mlp_4L_wide.yaml
 
     # Submit with custom GPU count and partition
     sst-train --config_path ... --n_gpus 4 --partition h200-reserved-default
@@ -17,7 +17,7 @@ Usage:
     sst-train --config_path ... --num_iterations 1000 --learning_rate 5e-5
 
     # Alternative: run the script directly
-    python scripts/deploy.py --config_path configs/llama_simple_mlp_4L_wide.yaml
+    python scripts/deploy.py --config_path simple_stories_train/configs/pile_llama_simple_mlp_4L_wide.yaml
 """
 
 import argparse
@@ -171,7 +171,7 @@ def main() -> None:
         sys.exit(1)
 
     # Default job name from config file
-    job_name = args.job_name or args.config_path.stem
+    job_name = args.job_name or "spd-sst-train"
 
     # Set default n_gpus based on mode
     n_gpus = args.n_gpus
