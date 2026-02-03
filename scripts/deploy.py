@@ -27,8 +27,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).parent.parent.resolve()
-SLURM_LOG_DIR = Path(os.environ.get("HOME", "/tmp")) / "slurm_logs"
+from simple_stories_train.settings import REPO_ROOT, SLURM_LOG_DIR
 
 
 def create_slurm_script(

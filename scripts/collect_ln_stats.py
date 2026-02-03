@@ -20,7 +20,7 @@ from torch import Tensor
 from simple_stories_train.dataloaders import DatasetConfig, create_data_loader
 from simple_stories_train.models.gpt2_simple import GPT2Simple, GPT2SimpleConfig
 from simple_stories_train.run_info import RunInfo
-from simple_stories_train.utils import REPO_ROOT
+from simple_stories_train.settings import REPO_ROOT
 
 
 @torch.no_grad()

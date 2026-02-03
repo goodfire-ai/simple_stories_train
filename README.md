@@ -55,28 +55,23 @@ where `N` is the number of GPUs to use.
 To submit training jobs to a SLURM cluster:
 
 ```bash
-# Generate SLURM script (review before submitting)
-python scripts/slurm_train.py --config simple_stories_train/train_config.yaml
+# Submit to SLURM (8 GPUs by default)
+sst-train --config_path simple_stories_train/configs/your_config.yaml
 
-# Generate and submit (8 GPUs, single node)
-python scripts/slurm_train.py --config simple_stories_train/train_config.yaml --n_gpus 8 --submit
+# Custom GPU count and partition
+sst-train --config_path ... --n_gpus 4 --partition h200-dev --time 24:00:00
 
-# Multi-node training (16 GPUs = 2 nodes × 8 GPUs)
-python scripts/slurm_train.py --config simple_stories_train/train_config.yaml --n_gpus 16 --submit
-
-# Custom partition and time limit
-python scripts/slurm_train.py --config simple_stories_train/train_config.yaml --partition h200-dev --time 24:00:00 --submit
+# Run locally instead of submitting to SLURM
+sst-train --config_path ... --local
 ```
 
 Options:
-- `--config`: Path to training config YAML (required)
-- `--n_gpus`: Number of GPUs (default: 8). Values >8 trigger multi-node DDP.
+- `--config_path`: Path to training config YAML (required)
+- `--n_gpus`: Number of GPUs (default: 8 for SLURM, 1 for local)
 - `--partition`: SLURM partition name (default: 'h200-reserved-default')
 - `--time`: Job time limit in HH:MM:SS (default: '72:00:00')
-- `--job_name`: Custom job name (default: auto-generated from config)
-- `--submit`: Actually submit the job (default: just generate script)
-
-Generated scripts are saved to `slurm_scripts/` and logs to `slurm_logs/`.
+- `--job_name`: Custom job name
+- `--local`: Run locally instead of submitting to SLURM
 
 ### Logging with Weights & Biases
 To track training with Weights & Biases, you can set the WANDB_PROJECT and WANDB_API_KEY variables in

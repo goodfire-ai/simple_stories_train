@@ -10,8 +10,6 @@ from pydantic import BaseModel
 from pydantic.v1.utils import deep_update
 from torch import nn
 
-REPO_ROOT = Path(__file__).parent.parent
-
 
 def print0(*args: Any, **kwargs: Any) -> None:
     # modified print that only prints from the master process

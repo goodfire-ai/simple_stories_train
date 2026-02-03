@@ -1,6 +1,6 @@
 wandb_project: spd
 dtype: float32
-batch_size: 2048
+batch_size: 1024
 num_iterations: 100_000
 warmup_iters: 600
 learning_rate: 1e-4
@@ -17,12 +17,12 @@ model:
   block_size: 512
   vocab_size: 50259  # GPT-2 tokenizer + [UNK]/[EOS]
   n_layer: 4
-  n_head: 6
-  n_embd: 192
-  n_intermediate: 768  # 192 * 4
-  rotary_dim: 32       # 192 // 6
+  n_head: 16
+  n_embd: 2048
+  n_intermediate: 8192  # 2048 * 4
+  rotary_dim: 341       # 2048 // 6
   n_ctx: 512
-  n_key_value_heads: 3
+  n_key_value_heads: 16
   flash_attention: false
 
 train_dataset_config:

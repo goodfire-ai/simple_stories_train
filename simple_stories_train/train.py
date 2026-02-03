@@ -50,8 +50,8 @@ from simple_stories_train.ln_free import (
 )
 from simple_stories_train.models import MODEL_CLASSES, ModelConfig
 from simple_stories_train.run_info import RunInfo
+from simple_stories_train.settings import REPO_ROOT
 from simple_stories_train.utils import (
-    REPO_ROOT,
     is_checkpoint_step,
     load_config,
     log_generations,
@@ -366,6 +366,8 @@ def main(config_path_or_obj: Path | str | Config | None = None, **kwargs: Any) -
     generations: list[list[Any]] = []
     # For LN ablation
     replaced_count = 0
+    # For ETA calculation
+    training_start_time = time.time()
 
     for step in range(1, config.num_iterations + 1):
         last_step = step == config.num_iterations
@@ -467,9 +469,17 @@ def main(config_path_or_obj: Path | str | Config | None = None, **kwargs: Any) -
         if step % config.train_log_every == 0:
             tokens_per_second = ddp_world_size * B * T / (t1 - t0)
             norm_str = f"norm {norm:.4f}" if norm is not None else ""
+            # Calculate ETA
+            elapsed = t1 - training_start_time
+            steps_done = step
+            steps_remaining = config.num_iterations - step
+            eta_seconds = (elapsed / steps_done) * steps_remaining if steps_done > 0 else 0
+            eta_h, eta_rem = divmod(int(eta_seconds), 3600)
+            eta_m, eta_s = divmod(eta_rem, 60)
+            eta_str = f"{eta_h}h {eta_m:02d}m" if eta_h > 0 else f"{eta_m}m {eta_s:02d}s"
             print0(
                 f"step {step:4d}/{config.num_iterations} | loss {lossf_value:.6f} | {norm_str} | "
-                f"lr {lr:.2e} | {(t1 - t0) * 1000:.2f}ms | {tokens_per_second:.0f} tok/s"
+                f"lr {lr:.2e} | {(t1 - t0) * 1000:.2f}ms | {tokens_per_second:.0f} tok/s | ETA {eta_str}"
             )
         if config.wandb_project is not None and master_process:
             log_metrics(step, {"train_loss": lossf_value, "lr": lr})
