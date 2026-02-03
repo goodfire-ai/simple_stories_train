@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 from typing import Any, TypeVar
@@ -8,8 +9,6 @@ import yaml
 from pydantic import BaseModel
 from pydantic.v1.utils import deep_update
 from torch import nn
-
-REPO_ROOT = Path(__file__).parent.parent
 
 
 def print0(*args: Any, **kwargs: Any) -> None:
@@ -26,21 +25,44 @@ def is_checkpoint_step(step: int) -> bool:
     return (0 < step < 1000 and (step & (step - 1)) == 0) or step % 1000 == 0
 
 
-def save_config(save_dir: Path, config_dict: dict[str, Any]) -> None:
+def save_configs(
+    save_dir: Path,
+    config_dict: dict[str, Any],
+    model_config_dict: dict[str, Any],
+    ln_stds: dict[str, float] | None = None,
+) -> None:
     config_file = save_dir / "final_config.yaml"
     with open(config_file, "w") as f:
         yaml.dump(config_dict, f)
     print0(f"Saved config to {config_file}")
+    model_config_file = save_dir / "model_config.yaml"
+    with open(model_config_file, "w") as f:
+        yaml.dump(model_config_dict, f)
+    print0(f"Saved model config to {model_config_file}")
+    ln_stds_file = None
+    if ln_stds is not None:
+        ln_stds_file = save_dir / "ln-stds.json"
+        with open(ln_stds_file, "w") as f:
+            json.dump(ln_stds, f)
+        print0(f"Saved ln stds to {ln_stds_file}")
+
     if config_dict.get("wandb_project"):
         wandb.save(str(config_file), policy="now", base_path=save_dir)
-        print0(f"Saved config to wandb: {str(config_file)}")
+        print0(f"Saved config to wandb from {str(config_file)}")
+        wandb.save(str(model_config_file), policy="now", base_path=save_dir)
+        print0(f"Saved model config to wandb from {str(model_config_file)}")
+        if ln_stds is not None:
+            assert ln_stds_file is not None
+            wandb.save(str(ln_stds_file), policy="now", base_path=save_dir)
+            print0(f"Saved ln stds to wandb from {str(ln_stds_file)}")
 
 
 def save_model(
     save_dir: Path, model: nn.Module, step: int, wandb_project: str | None = None
 ) -> None:
-    # Get the underlying model if it's DDP-wrapped
-    state_dict = model.module.state_dict() if hasattr(model, "module") else model.state_dict()
+    state_dict = model.state_dict()
+    # Remove DDP prefixes if present
+    state_dict = {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
 
     model_file = save_dir / f"model_step_{step}.pt"
     torch.save(state_dict, model_file)

@@ -1,7 +1,7 @@
 import inspect
 import math
-import os
-from typing import Literal, cast
+from pathlib import Path
+from typing import Literal
 
 import torch
 import torch.nn as nn
@@ -9,17 +9,16 @@ from jaxtyping import Float, Int
 from torch import Tensor
 from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch.nn import functional as F
-from transformers import LlamaConfig as HFLlamaConfig
-from transformers import LlamaForCausalLM
 
 from simple_stories_train.base_config import BaseConfig
+from simple_stories_train.run_info import RunInfo
 from simple_stories_train.utils import print0
 
 # pyright: reportAttributeAccessIssue=false, reportIndexIssue=false
 
 
-class LlamaConfig(BaseConfig):
-    model_type: Literal["Llama"]
+class LlamaSimpleConfig(BaseConfig):
+    model_type: Literal["LlamaSimple"]
     block_size: int = 1024
     vocab_size: int = 50257
     n_layer: int = 12
@@ -45,7 +44,7 @@ class CausalSelfAttention(nn.Module):
     rotary_sin: Tensor
     rotary_cos: Tensor
 
-    def __init__(self, config: LlamaConfig):
+    def __init__(self, config: LlamaSimpleConfig):
         super().__init__()
         assert config.n_embd % config.n_head == 0
         self.use_grouped_query_attention = config.use_grouped_query_attention
@@ -60,15 +59,25 @@ class CausalSelfAttention(nn.Module):
         self.n_ctx = config.n_ctx  # Max context length for precomputation
         self.flash_attention = config.flash_attention
         if self.use_grouped_query_attention:
-            self.q_attn = nn.Linear(config.n_embd, config.n_embd, bias=config.attn_bias)
-            self.kv_attn = nn.Linear(
-                config.n_embd, 2 * self.n_key_value_heads * self.head_dim, bias=config.attn_bias
+            self.q_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.attn_bias)
+            ########### NEW CODE ###########
+            self.k_proj = nn.Linear(
+                config.n_embd, self.n_key_value_heads * self.head_dim, bias=config.attn_bias
             )
+            self.v_proj = nn.Linear(
+                config.n_embd, self.n_key_value_heads * self.head_dim, bias=config.attn_bias
+            )
+            ########### END NEW CODE ###########
+            ########### OLD CODE ###########
+            # self.kv_attn = nn.Linear(
+            #     config.n_embd, 2 * self.n_key_value_heads * self.head_dim, bias=config.attn_bias
+            # )
+            ########### END OLD CODE ###########
         else:
             self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd, bias=config.attn_bias)
 
-        self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.attn_bias)
-        self.c_proj.LLMC_RESIDUAL_SCALE_FLAG = True  # type: ignore
+        self.o_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.attn_bias)
+        self.o_proj.LLMC_RESIDUAL_SCALE_FLAG = True  # type: ignore
 
         self.register_buffer(
             "bias",
@@ -174,10 +183,16 @@ class CausalSelfAttention(nn.Module):
         B, T, C = x.size()  # Batch size, Sequence length, Embedding dimension
 
         if self.use_grouped_query_attention:
-            q = self.q_attn(x)  # (B, T, C)
-            kv = self.kv_attn(x)  # (B, T, 2 * n_kv_heads * head_dim)
+            q = self.q_proj(x)  # (B, T, C)
+            ########### NEW CODE ###########
+            k = self.k_proj(x)  # (B, T, n_kv_heads * head_dim)
+            v = self.v_proj(x)  # (B, T, n_kv_heads * head_dim)
+            ########### END NEW CODE ###########
+            ########### OLD CODE ###########
             # Split K and V
-            k, v = kv.split(self.n_key_value_heads * self.head_dim, dim=2)
+            # k, v = kv.split(self.n_key_value_heads * self.head_dim, dim=2)
+            ########### END OLD CODE ###########
+
             # Reshape for multi-head attention
             q = q.view(B, T, self.n_head, self.head_dim).transpose(1, 2)  # (B, n_head, T, head_dim)
             k = k.view(B, T, self.n_key_value_heads, self.head_dim).transpose(
@@ -235,13 +250,13 @@ class CausalSelfAttention(nn.Module):
             y = att @ v  # (B, n_head, T, head_dim)
 
         y = y.transpose(1, 2).contiguous().view(B, T, C)  # (B, T, C)
-        y = self.c_proj(y)  # (B, T, C)
+        y = self.o_proj(y)  # (B, T, C)
 
         return y
 
 
 class SwiGLUMLP(nn.Module):
-    def __init__(self, config: LlamaConfig):
+    def __init__(self, config: LlamaSimpleConfig):
         super().__init__()
         self.config = config
         self.gate_proj = nn.Linear(config.n_embd, config.n_intermediate, bias=config.mlp_bias)
@@ -274,7 +289,7 @@ class LlamaRMSNorm(nn.Module):
 
 
 class Block(nn.Module):
-    def __init__(self, config: LlamaConfig):
+    def __init__(self, config: LlamaSimpleConfig):
         super().__init__()
         self.rms_1 = LlamaRMSNorm(config.n_embd, eps=config.rms_norm_eps)
         self.attn = CausalSelfAttention(config)
@@ -287,25 +302,33 @@ class Block(nn.Module):
         return x
 
 
-class Llama(nn.Module):
-    def __init__(self, config: LlamaConfig):
+class LlamaSimple(nn.Module):
+    def __init__(self, config: LlamaSimpleConfig):
         super().__init__()
         self.config = config
-        _blocks: list[Block] = [Block(config) for _ in range(config.n_layer)]
-        # Keep a typed Python list view for static type checking/iteration
-        self.h: list[Block] = _blocks
-        self.transformer: nn.ModuleDict = nn.ModuleDict(
-            {
-                "wte": nn.Embedding(config.vocab_size, config.n_embd),
-                "h": nn.ModuleList(_blocks),
-                "rms_f": LlamaRMSNorm(config.n_embd, eps=config.rms_norm_eps),
-            }
-        )
+        ########### NEW CODE ###########
+        self.wte: nn.Embedding = nn.Embedding(config.vocab_size, config.n_embd)
+        self._h: list[Block] = [Block(config) for _ in range(config.n_layer)]
+        self.h: nn.ModuleList = nn.ModuleList(self._h)
+        self.ln_f: LlamaRMSNorm = LlamaRMSNorm(config.n_embd, eps=config.rms_norm_eps)
+        ########### END NEW CODE ###########
+        ########### OLD CODE ###########
+        # _blocks: list[Block] = [Block(config) for _ in range(config.n_layer)]
+        # # Keep a typed Python list view for static type checking/iteration
+        # self.h: list[Block] = _blocks
+        # self.transformer: nn.ModuleDict = nn.ModuleDict(
+        #     {
+        #         "wte": nn.Embedding(config.vocab_size, config.n_embd),
+        #         "h": nn.ModuleList(_blocks),
+        #         "rms_f": LlamaRMSNorm(config.n_embd, eps=config.rms_norm_eps),
+        #     }
+        # )
+        ########### END OLD CODE ###########
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
         self.lm_head.LLMC_SKIP_INIT = True  # type: ignore
 
         # Tie embeddings and lm_head weights
-        self.transformer.wte.weight = self.lm_head.weight  # type: ignore[reportAttributeAccessIssue]
+        self.wte.weight = self.lm_head.weight  # type: ignore[reportAttributeAccessIssue]
         self.init_rng = torch.Generator()
         self.init_rng.manual_seed(42)
         self.apply(self._init_weights)
@@ -335,11 +358,11 @@ class Llama(nn.Module):
         assert t <= self.config.block_size, (
             f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
         )
-        tok_emb = self.transformer.wte(idx)  # pyright: ignore[reportCallIssue]
+        tok_emb = self.wte(idx)  # pyright: ignore[reportCallIssue]
         x = tok_emb
-        for block in self.transformer.h:  # pyright: ignore[reportGeneralTypeIssues]
+        for block in self._h:  # pyright: ignore[reportGeneralTypeIssues]
             x = block(x)
-        x = self.transformer.rms_f(x)  # pyright: ignore[reportCallIssue]
+        x = self.ln_f(x)  # pyright: ignore[reportCallIssue]
         logits = self.lm_head(x)
         loss = None
         if targets is not None:
@@ -352,56 +375,24 @@ class Llama(nn.Module):
         return logits, loss
 
     @classmethod
-    def from_pretrained(
-        cls, model_path_or_id: str, config: LlamaConfig, strict: bool = True
-    ) -> "Llama":
-        is_local = os.path.exists(model_path_or_id)
+    def from_run_info(cls, run_info: RunInfo) -> "LlamaSimple":
+        """Create a LlamaSimple model from a RunInfo, loading weights from its checkpoint."""
+        model = cls(LlamaSimpleConfig(**run_info.model_config_dict))
+        state_dict = torch.load(run_info.checkpoint_path, map_location="cpu", weights_only=True)
+        model.load_state_dict(state_dict, strict=True)
+        return model
 
-        if is_local:
-            # Handle local files (existing logic for custom format)
-            state_dict = torch.load(model_path_or_id, weights_only=True, map_location="cpu")
-            model = cls(config)
+    @classmethod
+    def from_pretrained(cls, model_path: str | Path) -> "LlamaSimple":
+        """Create a LlamaSimple model from a wandb string or a local path.
 
-            state_dict = {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
-
-            # Remove rotary_sin and rotary_cos from state_dict to regenerate them
-            keys_to_remove = [
-                k for k in state_dict if k.endswith("rotary_sin") or k.endswith("rotary_cos")
-            ]
-            for k in keys_to_remove:
-                state_dict.pop(k)
-
-            # Load state dict (ignoring rotary buffers)
-            model.load_state_dict(state_dict, strict=strict)
-
-            # Regenerate rotary_sin and rotary_cos for each attention layer
-            for _, block in enumerate(model.transformer.h):  # type: ignore
-                attn = block.attn
-                sin, cos = attn.calculate_sin_cos_rotary(
-                    rotary_dim=attn.rotary_dim,
-                    n_ctx=attn.n_ctx,
-                    base=attn.rotary_base,
-                    dtype=attn.rotary_cos.dtype if hasattr(attn, "rotary_cos") else torch.float32,
-                )
-                attn.register_buffer("rotary_sin", sin)
-                attn.register_buffer("rotary_cos", cos)
-
-            return model
-
-        else:
-            # Handle HuggingFace Hub models using the conversion function
-            try:
-                hf_model = LlamaForCausalLM.from_pretrained(model_path_or_id)
-
-                model = convert_llama_for_causal_lm_to_llama(hf_model)
-
-                return model
-
-            except Exception as err:
-                raise ValueError(
-                    f"Error loading model from HuggingFace Hub: {str(err)}. "
-                    f"Please ensure the model path or ID '{model_path_or_id}' is correct."
-                ) from err
+        Args:
+            model_path:
+                - W&B strings: 'wandb:goodfire/spd-play/runs/152i5k4r'
+                - Local: path to a .pt checkpoint file
+        """
+        run_info = RunInfo.from_path(model_path)
+        return cls.from_run_info(run_info)
 
     def configure_optimizers(
         self,
@@ -521,153 +512,3 @@ class Llama(nn.Module):
             idx = idx.squeeze(0)
 
         return idx
-
-
-def convert_llama_for_causal_lm_to_llama(hf_model: LlamaForCausalLM) -> Llama:
-    # Create a matching custom Llama configuration
-    hf_config = hf_model.config
-
-    model_config = LlamaConfig(
-        model_type="Llama",
-        vocab_size=hf_config.vocab_size,
-        n_layer=hf_config.num_hidden_layers,
-        n_head=hf_config.num_attention_heads,
-        n_embd=hf_config.hidden_size,
-        n_intermediate=hf_config.intermediate_size,
-        rotary_dim=hf_config.hidden_size // hf_config.num_attention_heads,  # Assuming head_dim
-        n_key_value_heads=hf_config.num_key_value_heads,
-    )
-
-    model = Llama(model_config)
-
-    # Convert embeddings
-    model.transformer.wte.weight.data = hf_model.model.embed_tokens.weight.data
-
-    for i in range(hf_config.num_hidden_layers):
-        # RMSNorm 1
-        model.transformer.h[i].rms_1.weight.data = hf_model.model.layers[
-            i
-        ].input_layernorm.weight.data
-
-        # Attention weights
-        model.transformer.h[i].attn.q_attn.weight.data = hf_model.model.layers[
-            i
-        ].self_attn.q_proj.weight.data
-
-        # Key and Value projections - combine separate HF weights into single KV weight
-        k_weight = cast(Tensor, hf_model.model.layers[i].self_attn.k_proj.weight.data)
-        v_weight = cast(Tensor, hf_model.model.layers[i].self_attn.v_proj.weight.data)
-        kv_combined = torch.cat([k_weight, v_weight], dim=0)
-
-        model.transformer.h[i].attn.kv_attn.weight.data = kv_combined
-
-        # Output projection
-        model.transformer.h[i].attn.c_proj.weight.data = hf_model.model.layers[
-            i
-        ].self_attn.o_proj.weight.data
-
-        # RMSNorm 2
-        model.transformer.h[i].rms_2.weight.data = hf_model.model.layers[
-            i
-        ].post_attention_layernorm.weight.data
-
-        # MLP layers
-        model.transformer.h[i].mlp.gate_proj.weight.data = hf_model.model.layers[
-            i
-        ].mlp.gate_proj.weight.data
-        model.transformer.h[i].mlp.up_proj.weight.data = hf_model.model.layers[
-            i
-        ].mlp.up_proj.weight.data
-        model.transformer.h[i].mlp.down_proj.weight.data = hf_model.model.layers[
-            i
-        ].mlp.down_proj.weight.data
-
-    # Final layer norm
-    model.transformer.rms_f.weight.data = hf_model.model.norm.weight.data
-
-    # LM head
-    model.lm_head.weight.data = hf_model.lm_head.weight.data
-
-    return model
-
-
-def convert_llama_to_llama_for_causal_lm(custom_model: Llama) -> LlamaForCausalLM:
-    """Convert Llama model to HuggingFace format.
-
-    Args:
-        custom_model: The custom Llama model to convert
-
-    Returns:
-        The converted HuggingFace model
-    """
-    model_config = custom_model.config
-
-    # Create a matching HuggingFace configuration
-    hf_config = HFLlamaConfig(
-        vocab_size=model_config.vocab_size,
-        hidden_size=model_config.n_embd,
-        intermediate_size=model_config.n_intermediate,
-        num_hidden_layers=model_config.n_layer,
-        num_attention_heads=model_config.n_head,
-        num_key_value_heads=model_config.n_key_value_heads,
-        hidden_act="silu",
-        max_position_embeddings=2048,
-        rms_norm_eps=model_config.rms_norm_eps,
-        tie_word_embeddings=True,
-    )
-
-    hf_model = LlamaForCausalLM(hf_config)
-
-    hf_model.model.embed_tokens.weight.data = custom_model.transformer.wte.weight.data
-
-    for i in range(model_config.n_layer):
-        # RMSNorm 1
-        hf_model.model.layers[i].input_layernorm.weight.data = custom_model.transformer.h[
-            i
-        ].rms_1.weight.data
-
-        # Attention weights
-        # Query projection
-        hf_model.model.layers[i].self_attn.q_proj.weight.data = custom_model.transformer.h[
-            i
-        ].attn.q_attn.weight.data
-
-        # Key and Value are combined in your model but separate in HF model
-        kv_weight = custom_model.transformer.h[i].attn.kv_attn.weight.data
-        kv_dim = kv_weight.shape[0] // 2
-
-        # Split KV weights for HF model
-        hf_model.model.layers[i].self_attn.k_proj.weight.data = kv_weight[:kv_dim, :]
-        hf_model.model.layers[i].self_attn.v_proj.weight.data = kv_weight[kv_dim:, :]
-
-        # Output projection
-        hf_model.model.layers[i].self_attn.o_proj.weight.data = custom_model.transformer.h[
-            i
-        ].attn.c_proj.weight.data
-
-        # RMSNorm 2
-        hf_model.model.layers[i].post_attention_layernorm.weight.data = custom_model.transformer.h[
-            i
-        ].rms_2.weight.data
-
-        # MLP layers
-        hf_model.model.layers[i].mlp.gate_proj.weight.data = custom_model.transformer.h[
-            i
-        ].mlp.gate_proj.weight.data
-        hf_model.model.layers[i].mlp.up_proj.weight.data = custom_model.transformer.h[
-            i
-        ].mlp.up_proj.weight.data
-        hf_model.model.layers[i].mlp.down_proj.weight.data = custom_model.transformer.h[
-            i
-        ].mlp.down_proj.weight.data
-
-    # 3. Final layer norm
-    hf_model.model.norm.weight.data = custom_model.transformer.rms_f.weight.data
-
-    # 4. LM head
-    hf_model.lm_head.weight.data = custom_model.lm_head.weight.data
-
-    # Set model to eval mode
-    hf_model.eval()
-
-    return hf_model

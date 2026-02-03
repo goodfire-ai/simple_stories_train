@@ -5,7 +5,7 @@ description = "Training of small LM models for SimpleStories"
 requires-python = ">=3.11"
 readme = "README.md"
 dependencies = [
-    "torch<2.6.0",
+    "torch>=2.6",
     "torchvision",
     "pydantic",
     "wandb",
@@ -18,6 +18,7 @@ dependencies = [
     "transformers",
     "datasets",
     "python-dotenv",
+    "zstandard", # Required for Pile dataset (zstd compression)
 ]
 
 [project.optional-dependencies]
@@ -30,6 +31,14 @@ dev = [
 [build-system]
 requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[project.scripts]
+sst-train = "simple_stories_train.deploy_train:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["simple_stories_train*"]
+
 
 [tool.ruff]
 line-length = 100
@@ -63,6 +72,7 @@ known-third-party = ["wandb"]
 
 [tool.pyright]
 include = ["simple_stories_train", "tests"]
+exclude = ["build", "dist"]
 
 strictListInference = true
 strictDictionaryInference = true
@@ -71,7 +81,6 @@ reportFunctionMemberAccess = true
 reportUnknownParameterType = true
 reportIncompatibleMethodOverride = true
 reportIncompatibleVariableOverride = true
-reportInconsistentConstructorType = true
 reportOverlappingOverload = true
 reportConstantRedefinition = true
 reportImportCycles = true
@@ -82,5 +91,4 @@ reportUnnecessaryComparison = true
 reportUnnecessaryContains = true
 reportUnusedExpression = true
 reportMatchNotExhaustive = true
-reportShadowedImports = true
 reportPrivateImportUsage = false
