@@ -13,15 +13,59 @@ from transformers import AutoTokenizer
 
 from simple_stories_train.settings import REPO_ROOT
 
-WANDB_PATH_PREFIX = "wandb:"
+# Regex patterns for parsing W&B run references
+_WANDB_PATH_RE = re.compile(r"^([^/]+)/([^/]+)/([^/]+)$")  # entity/project/runid
+# entity/project/runs/runid
+_WANDB_PATH_WITH_RUNS_RE = re.compile(r"^([^/]+)/([^/]+)/runs/([^/]+)$")
+_WANDB_URL_RE = re.compile(r"^https?://wandb\.ai/([^/]+)/([^/]+)/runs/([^/?]+)")  # URL format
 
 
-def _is_wandb_path(path: str | Path) -> bool:
-    return isinstance(path, str) and path.startswith(WANDB_PATH_PREFIX)
+def parse_wandb_run_path(input_path: str) -> tuple[str, str, str]:
+    """Parse various W&B run reference formats into (entity, project, run_id).
+
+    Accepts:
+    - "entity/project/runId" (compact form)
+    - "entity/project/runs/runId" (with /runs/)
+    - "wandb:entity/project/runId" (with wandb: prefix)
+    - "wandb:entity/project/runs/runId" (full wandb: form)
+    - "https://wandb.ai/entity/project/runs/runId..." (URL)
+
+    Returns:
+        Tuple of (entity, project, run_id)
+
+    Raises:
+        ValueError: If the input doesn't match any expected format.
+    """
+    s = input_path.strip()
+
+    # Strip wandb: prefix if present
+    if s.startswith("wandb:"):
+        s = s[6:]
+
+    # Try compact form: entity/project/runid
+    if m := _WANDB_PATH_RE.match(s):
+        return m.group(1), m.group(2), m.group(3)
+
+    # Try form with /runs/: entity/project/runs/runid
+    if m := _WANDB_PATH_WITH_RUNS_RE.match(s):
+        return m.group(1), m.group(2), m.group(3)
+
+    # Try full URL
+    if m := _WANDB_URL_RE.match(s):
+        return m.group(1), m.group(2), m.group(3)
+
+    raise ValueError(
+        f"Invalid W&B run reference. Expected one of:\n"
+        f' - "entity/project/xxxxxxxx"\n'
+        f' - "entity/project/runs/xxxxxxxx"\n'
+        f' - "wandb:entity/project/runs/xxxxxxxx"\n'
+        f' - "https://wandb.ai/entity/project/runs/xxxxxxxx"\n'
+        f'Got: "{input_path}"'
+    )
 
 
-def _wandb_slug(path_no_prefix: str) -> str:
-    return path_no_prefix.strip("/").replace("/", "__")
+def _wandb_slug(entity: str, project: str, run_id: str) -> str:
+    return f"{entity}__{project}__{run_id}"
 
 
 def _cache_dir_for_slug(slug: str) -> Path:
@@ -29,18 +73,18 @@ def _cache_dir_for_slug(slug: str) -> Path:
 
 
 def _download_wandb_files(
-    wandb_path_no_prefix: str,
+    entity: str, project: str, run_id: str
 ) -> tuple[Path, Path, Path, Path | None, Path | None]:
     """Download core artifacts for the given W&B run.
 
     Returns (checkpoint_path, config_path, model_config_path, ln_stds_path, tokenizer_path).
     """
-    slug = _wandb_slug(wandb_path_no_prefix)
+    slug = _wandb_slug(entity, project, run_id)
     cache_dir = _cache_dir_for_slug(slug)
     cache_dir.mkdir(parents=True, exist_ok=True)
 
     api = wandb.Api()
-    run = api.run(wandb_path_no_prefix)
+    run = api.run(f"{entity}/{project}/{run_id}")
     files = list(run.files())
 
     # Locate config file
@@ -122,48 +166,80 @@ class RunInfo:
     def from_path(cls, path: str | Path) -> RunInfo:
         """Load run info from a W&B run string or a local path.
 
-        - W&B strings: 'wandb:goodfire/spd-play/runs/152i5k4r'
-        - Local: path to a checkpoint file or a directory containing checkpoints
+        W&B formats:
+        - "entity/project/runId" (compact form)
+        - "entity/project/runs/runId" (with /runs/)
+        - "wandb:entity/project/runId" (with wandb: prefix)
+        - "wandb:entity/project/runs/runId" (full wandb: form)
+        - "https://wandb.ai/entity/project/runs/runId..." (URL)
+
+        Local: path to a checkpoint file
         """
-        # Handle W&B path
-        if _is_wandb_path(path):
-            wandb_path = path[len(WANDB_PATH_PREFIX) :]  # type: ignore[index]
+        try:
+            entity, project, run_id = parse_wandb_run_path(str(path))
+        except ValueError:
+            # Not a W&B path, treat as local
+            pass
+        else:
+            # W&B path - download files
             (
                 ckpt_path,
                 config_path,
                 model_config_path,
                 ln_stds_path,
                 tokenizer_path,
-            ) = _download_wandb_files(wandb_path)
-        else:
-            ckpt_path = Path(path)
-            assert ckpt_path.is_file(), f"Expected a file, got {ckpt_path}"
-            # Look for configs and tokenizer in parent.parent (output_dir)
-            output_dir = ckpt_path.parent.parent
-            config_path = output_dir / "final_config.yaml"
-            model_config_path = output_dir / "model_config.yaml"
-            assert config_path.exists(), (
-                f"Expected config at {config_path} next to checkpoint {ckpt_path}"
+            ) = _download_wandb_files(entity, project, run_id)
+
+            with open(config_path) as f:
+                config_dict = yaml.safe_load(f)
+
+            with open(model_config_path) as f:
+                model_config_dict = yaml.safe_load(f)
+
+            if ln_stds_path is not None:
+                with open(ln_stds_path) as f:
+                    ln_stds = json.load(f)
+            else:
+                ln_stds = None
+
+            # Optional HF tokenizer reference from config
+            try:
+                hf_tok_path = config_dict["train_dataset_config"]["hf_tokenizer_path"]
+                hf_tok_path = hf_tok_path if isinstance(hf_tok_path, str) else None
+            except Exception:
+                hf_tok_path = None
+
+            return cls(
+                checkpoint_path=ckpt_path,
+                config_dict=config_dict,
+                model_config_dict=model_config_dict,
+                ln_stds=ln_stds,
+                tokenizer_path=tokenizer_path,
+                hf_tokenizer_path=hf_tok_path,
             )
-            assert model_config_path.exists(), (
-                f"Expected model config at {model_config_path} next to checkpoint {ckpt_path}"
-            )
-            tokenizer_path = output_dir / "tokenizer.json"
-            if not tokenizer_path.exists():
-                tokenizer_path = None
-            ln_stds_path = None  # Not supported for local paths
+
+        # Local path
+        ckpt_path = Path(path)
+        assert ckpt_path.is_file(), f"Expected a file, got {ckpt_path}"
+        # Look for configs and tokenizer in parent.parent (output_dir)
+        output_dir = ckpt_path.parent.parent
+        config_path = output_dir / "final_config.yaml"
+        model_config_path = output_dir / "model_config.yaml"
+        assert config_path.exists(), (
+            f"Expected config at {config_path} next to checkpoint {ckpt_path}"
+        )
+        assert model_config_path.exists(), (
+            f"Expected model config at {model_config_path} next to checkpoint {ckpt_path}"
+        )
+        tokenizer_path = output_dir / "tokenizer.json"
+        if not tokenizer_path.exists():
+            tokenizer_path = None
 
         with open(config_path) as f:
             config_dict = yaml.safe_load(f)
 
         with open(model_config_path) as f:
             model_config_dict = yaml.safe_load(f)
-
-        if ln_stds_path is not None:
-            with open(ln_stds_path) as f:
-                ln_stds = json.load(f)
-        else:
-            ln_stds = None
 
         # Optional HF tokenizer reference from config
         try:
@@ -176,7 +252,7 @@ class RunInfo:
             checkpoint_path=ckpt_path,
             config_dict=config_dict,
             model_config_dict=model_config_dict,
-            ln_stds=ln_stds,
+            ln_stds=None,  # Not supported for local paths
             tokenizer_path=tokenizer_path,
             hf_tokenizer_path=hf_tok_path,
         )

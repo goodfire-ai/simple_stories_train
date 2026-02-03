@@ -388,7 +388,7 @@ class LlamaSimple(nn.Module):
 
         Args:
             model_path:
-                - W&B strings: 'wandb:goodfire/spd-play/runs/152i5k4r'
+                - W&B strings: 'goodfire/spd-play/runs/152i5k4r'
                 - Local: path to a .pt checkpoint file
         """
         run_info = RunInfo.from_path(model_path)

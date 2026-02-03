@@ -323,9 +323,6 @@ def main(config_path_or_obj: Path | str | Config | None = None, **kwargs: Any) -
     ln_order_paths: list[str] = []
     ln_stds: dict[str, float] | None = None
     if config.enable_ln_ablation:
-        assert isinstance(config.from_pretrained, str) and config.from_pretrained.startswith(
-            "wandb:"
-        ), "Currently only supports wandb paths"
         assert config.from_pretrained is not None
         ln_stds = RunInfo.from_path(config.from_pretrained).ln_stds
         assert ln_stds is not None, "enable_ln_ablation=True but ln_stds is None"

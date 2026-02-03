@@ -2,7 +2,7 @@
 
 Usage:
 ```bash
-python scripts/collect_ln_stats.py --batches 50 --batch_size 64 --n_ctx 512 --wandb_path wandb:goodfire/spd/runs/syhzse3u
+python scripts/collect_ln_stats.py --batches 50 --batch_size 64 --n_ctx 512 --wandb_path goodfire/spd/runs/syhzse3u
 ```
 """
 
@@ -33,7 +33,7 @@ def main() -> None:
         "--wandb_path",
         type=str,
         required=True,
-        help="wandb path (e.g. wandb:goodfire/spd/runs/syhzse3u)",
+        help="wandb path (e.g. goodfire/spd/runs/syhzse3u)",
     )
     parser.add_argument("--dataset_name", type=str, default="SimpleStories/SimpleStories")
     parser.add_argument("--streaming", type=int, default=0)
@@ -45,8 +45,6 @@ def main() -> None:
         default="simple_stories_train/tokenizer/simplestories-tokenizer.json",
     )
     args = parser.parse_args()
-
-    assert args.wandb_path.startswith("wandb:"), "Currently only supports wandb paths"
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     run_info = RunInfo.from_path(args.wandb_path)
@@ -120,7 +118,7 @@ def main() -> None:
         json.dump(stats, f, indent=2)
 
     api = wandb.Api()
-    run = api.run(args.wandb_path.removeprefix("wandb:"))
+    run = api.run(args.wandb_path)
     run.upload_file(filename, root=out_path)
 
     print(f"Saved LN stats to {filename}")
