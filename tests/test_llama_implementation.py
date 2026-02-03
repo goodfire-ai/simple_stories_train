@@ -29,6 +29,7 @@ def test_rotary_embedding_implementation() -> None:
     )
 
     custom_llama_config = LlamaConfig(
+        model_type="Llama",
         block_size=1024,
         vocab_size=50257,
         n_layer=12,
@@ -85,6 +86,7 @@ def test_rotary_embedding_implementation() -> None:
 def test_local_pt_model_loading() -> None:
     """Test loading a model from a local .pt file"""
     config = LlamaConfig(
+        model_type="Llama",
         block_size=128,
         vocab_size=300,
         n_layer=2,
@@ -118,6 +120,7 @@ def test_local_pt_model_loading() -> None:
 def test_generation_with_eos_token_id() -> None:
     """Test the generate method with EOS token for both single and batched sequences"""
     config = LlamaConfig(
+        model_type="Llama",
         block_size=128,
         vocab_size=4,
         n_layer=2,
@@ -162,6 +165,7 @@ def test_generation_with_eos_token_id() -> None:
 def test_generation_without_eos_token_id() -> None:
     """Test the generate method without EOS token for both single and batched sequences"""
     config = LlamaConfig(
+        model_type="Llama",
         block_size=128,
         vocab_size=4,
         n_layer=2,
