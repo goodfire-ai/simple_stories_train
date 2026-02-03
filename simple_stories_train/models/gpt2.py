@@ -5,20 +5,20 @@ from typing import Any, Literal, cast
 import torch
 import torch.nn as nn
 from jaxtyping import Float
-from pydantic import BaseModel, ConfigDict
 from torch import Tensor
 from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch.nn import functional as F
 from transformers import GPT2Config as HFGPT2Config
 from transformers import GPT2LMHeadModel
 
+from simple_stories_train.base_config import BaseConfig
 from simple_stories_train.utils import print0
 
 # pyright: reportAttributeAccessIssue=false, reportIndexIssue=false
 
 
-class GPT2Config(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+class GPT2Config(BaseConfig):
+    model_type: Literal["GPT2"]
     block_size: int = 1024
     vocab_size: int = 50257
     n_layer: int = 12
@@ -426,6 +426,7 @@ def convert_hf_gpt2_to_gpt2(hf_model: GPT2LMHeadModel) -> GPT2:
         Our custom GPT2 model with weights copied from the HF model
     """
     custom_config = GPT2Config(
+        model_type="GPT2",
         block_size=hf_model.config.n_ctx,
         vocab_size=hf_model.config.vocab_size,
         n_layer=hf_model.config.n_layer,

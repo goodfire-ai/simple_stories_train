@@ -11,7 +11,7 @@ import yaml
 from tokenizers import Tokenizer as HFTokenizer
 from transformers import AutoTokenizer
 
-from simple_stories_train.utils import REPO_ROOT
+from simple_stories_train.settings import REPO_ROOT
 
 WANDB_PATH_PREFIX = "wandb:"
 

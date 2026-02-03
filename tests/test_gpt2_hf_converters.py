@@ -20,7 +20,9 @@ from simple_stories_train.models.gpt2 import (
 def test_convert_gpt2_to_hf_gpt2() -> None:
     """Validate custom -> HF conversion produces identical logits."""
     # Small config for speed
-    config = GPT2Config(block_size=64, vocab_size=50257, n_layer=2, n_head=2, n_embd=128)
+    config = GPT2Config(
+        model_type="GPT2", block_size=64, vocab_size=50257, n_layer=2, n_head=2, n_embd=128
+    )
     custom_model = GPT2(config)
     custom_model.eval()
 

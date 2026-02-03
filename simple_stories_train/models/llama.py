@@ -1,25 +1,25 @@
 import inspect
 import math
 import os
-from typing import cast
+from typing import Literal, cast
 
 import torch
 import torch.nn as nn
 from jaxtyping import Float, Int
-from pydantic import BaseModel, ConfigDict
 from torch import Tensor
 from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch.nn import functional as F
 from transformers import LlamaConfig as HFLlamaConfig
 from transformers import LlamaForCausalLM
 
+from simple_stories_train.base_config import BaseConfig
 from simple_stories_train.utils import print0
 
 # pyright: reportAttributeAccessIssue=false, reportIndexIssue=false
 
 
-class LlamaConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+class LlamaConfig(BaseConfig):
+    model_type: Literal["Llama"]
     block_size: int = 1024
     vocab_size: int = 50257
     n_layer: int = 12
@@ -54,7 +54,7 @@ class CausalSelfAttention(nn.Module):
         self.head_dim = config.n_embd // config.n_head  # Head size
         self.n_key_value_heads = config.n_key_value_heads
         self.repeat_kv_heads = config.n_head // config.n_key_value_heads  # Will be 1 if not GQA
-        self.rotary_dim = self.head_dim  # Align rotary_dim with head_dim for simplicity here, different from our original intention
+        self.rotary_dim = self.head_dim  # Align rotary_dim with head_dim for simplicity
         self.rotary_adjacent_pairs = config.rotary_adjacent_pairs
         self.rotary_base = config.rotary_base
         self.n_ctx = config.n_ctx  # Max context length for precomputation
@@ -331,7 +331,6 @@ class Llama(nn.Module):
         targets: Float[Tensor, "batch pos vocab"] | None = None,
         return_logits: bool = True,
     ) -> tuple[Float[Tensor, "batch pos vocab"] | None, Float[Tensor, ""] | None]:
-        device = idx.device
         b, t = idx.size()
         assert t <= self.config.block_size, (
             f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
@@ -426,12 +425,8 @@ class Llama(nn.Module):
         ]
         num_decay_params = sum(p.numel() for p in decay_params)
         num_nodecay_params = sum(p.numel() for p in nodecay_params)
-        print0(
-            f"num decayed parameter tensors: {len(decay_params)}, with {num_decay_params:,} parameters"
-        )
-        print0(
-            f"num non-decayed parameter tensors: {len(nodecay_params)}, with {num_nodecay_params:,} parameters"
-        )
+        print0(f"num decayed tensors: {len(decay_params)}, {num_decay_params:,} params")
+        print0(f"num non-decayed tensors: {len(nodecay_params)}, {num_nodecay_params:,} params")
         # Create AdamW optimizer and use the fused version if it is available
         fused_available = "fused" in inspect.signature(torch.optim.AdamW).parameters
         use_fused = fused_available and device_type == "cuda"
@@ -533,6 +528,7 @@ def convert_llama_for_causal_lm_to_llama(hf_model: LlamaForCausalLM) -> Llama:
     hf_config = hf_model.config
 
     model_config = LlamaConfig(
+        model_type="Llama",
         vocab_size=hf_config.vocab_size,
         n_layer=hf_config.num_hidden_layers,
         n_head=hf_config.num_attention_heads,

@@ -5,10 +5,11 @@ import torch
 from datasets import Dataset, IterableDataset, load_dataset
 from datasets.distributed import split_dataset_by_node
 from numpy.typing import NDArray
-from pydantic import BaseModel, ConfigDict
 from tokenizers import Tokenizer
 from torch.utils.data import DataLoader
 from transformers import AutoTokenizer
+
+from simple_stories_train.base_config import BaseConfig
 
 """
 The bulk of this file is copied from https://github.com/ApolloResearch/e2e_sae
@@ -16,8 +17,7 @@ licensed under MIT, (c) 2024 ApolloResearch.
 """
 
 
-class DatasetConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+class DatasetConfig(BaseConfig):
     name: str = "SimpleStories/SimpleStories"
     is_tokenized: bool = True
     tokenizer_file_path: str | None = "simple_stories_train/tokenizer/simplestories-tokenizer.json"
@@ -32,11 +32,23 @@ class DatasetConfig(BaseModel):
     for datasets tokenized in TransformerLens (e.g. NeelNanda/pile-10k)."""
 
 
-def _keep_single_column(dataset: Dataset, col_name: str) -> Dataset:
+def _keep_single_column(
+    dataset: Dataset | IterableDataset, col_name: str
+) -> Dataset | IterableDataset:
     """
     Acts on a HuggingFace dataset to delete all columns apart from a single column name - useful
     when we want to tokenize and mix together different strings.
     """
+    # For IterableDataset with features=None (streaming datasets), we can't iterate over features.
+    # However, we don't need to pre-filter columns since the map() function with remove_columns
+    # will handle this properly.
+    if isinstance(dataset, IterableDataset) and dataset.features is None:
+        # Skip column filtering for streaming datasets without features
+        # The map() function will handle column management via remove_columns parameter
+        return dataset
+
+    # For regular datasets or IterableDatasets with features, remove unwanted columns
+    assert dataset.features is not None
     for key in dataset.features:  # pyright: ignore[reportAttributeAccessIssue]
         if key != col_name:
             dataset = dataset.remove_columns(key)
@@ -44,14 +56,14 @@ def _keep_single_column(dataset: Dataset, col_name: str) -> Dataset:
 
 
 def tokenize_and_concatenate(
-    dataset: Dataset,
+    dataset: Dataset | IterableDataset,
     tokenizer: Tokenizer,
     max_length: int = 1024,
     column_name: str = "story",
     add_bos_token: bool = False,
     num_proc: int = 10,
     to_lower: bool = True,
-) -> Dataset:
+) -> Dataset | IterableDataset:
     """Helper function to tokenizer and concatenate a dataset of text. This converts the text to
     tokens, concatenates them (separated by EOS tokens) and then reshapes them into a 2D array of
     shape (____, sequence_length), dropping the last batch. Tokenizers are much faster if
@@ -154,6 +166,7 @@ def create_data_loader(
     global_seed: int = 0,
     ddp_rank: int = 0,
     ddp_world_size: int = 1,
+    split_for_ddp: bool = True,
 ) -> tuple[DataLoader[Any], Tokenizer]:
     """Create a DataLoader for the given dataset.
 
@@ -164,10 +177,26 @@ def create_data_loader(
         global_seed: Used for shuffling if dataset_config.seed is None.
         ddp_rank: The rank of the current process in DDP.
         ddp_world_size: The world size in DDP.
+        split_for_ddp: If True, split the dataset across DDP ranks. Set to False for
+            validation datasets where you want all ranks to see the same data.
 
     Returns:
         A tuple of the DataLoader and the tokenizer.
     """
+    import torch.distributed as dist
+
+    # For streaming datasets in DDP, have rank 0 initialize first to cache file metadata,
+    # then synchronize before other ranks load. This prevents race conditions.
+    if dataset_config.streaming and ddp_world_size > 1 and dist.is_initialized():
+        if ddp_rank == 0:
+            load_dataset(
+                dataset_config.name,
+                streaming=dataset_config.streaming,
+                split=dataset_config.split,
+                trust_remote_code=False,
+            )
+        dist.barrier()
+
     dataset = load_dataset(
         dataset_config.name,
         streaming=dataset_config.streaming,
@@ -180,7 +209,8 @@ def create_data_loader(
         dataset = dataset.shuffle(seed=seed, buffer_size=buffer_size)
     else:
         dataset = dataset.shuffle(seed=seed)
-    dataset = split_dataset_by_node(dataset, ddp_rank, ddp_world_size)  # type: ignore
+    if split_for_ddp:
+        dataset = split_dataset_by_node(dataset, ddp_rank, ddp_world_size)  # type: ignore
 
     # Load tokenizer based on config
     if dataset_config.hf_tokenizer_path is not None:
@@ -214,6 +244,7 @@ def create_data_loader(
             dataset,  # type: ignore
             tokenizer,
             max_length=dataset_config.n_ctx,
+            column_name=dataset_config.column_name,
             add_bos_token=False,
         )
 

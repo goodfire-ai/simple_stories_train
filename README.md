@@ -50,6 +50,29 @@ torchrun --standalone --nproc_per_node=N -m simple_stories_train.train ...
 ```
 where `N` is the number of GPUs to use.
 
+### SLURM Cluster Submission
+
+To submit training jobs to a SLURM cluster:
+
+```bash
+# Submit to SLURM (8 GPUs by default)
+sst-train --config_path simple_stories_train/configs/your_config.yaml
+
+# Custom GPU count and partition
+sst-train --config_path ... --n_gpus 4 --partition h200-dev --time 24:00:00
+
+# Run locally instead of submitting to SLURM
+sst-train --config_path ... --local
+```
+
+Options:
+- `--config_path`: Path to training config YAML (required)
+- `--n_gpus`: Number of GPUs (default: 8 for SLURM, 1 for local)
+- `--partition`: SLURM partition name (default: 'h200-reserved-default')
+- `--time`: Job time limit in HH:MM:SS (default: '72:00:00')
+- `--job_name`: Custom job name
+- `--local`: Run locally instead of submitting to SLURM
+
 ### Logging with Weights & Biases
 To track training with Weights & Biases, you can set the WANDB_PROJECT and WANDB_API_KEY variables in
 `.env`. API keys can be obtained from your [Weights & Biases account settings](https://wandb.ai/settings).
