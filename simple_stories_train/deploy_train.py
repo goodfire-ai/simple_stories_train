@@ -5,7 +5,7 @@ This script can be run directly or via the `sst-train` command after installing 
 
 Usage:
     # Submit to SLURM
-    sst-train --config_path simple_stories_train/configs/pile_llama_simple_mlp_4L_wide.yaml
+    sst-train --config_path simple_stories_train/configs/pile_llama_simple_mlp_4L.yaml
 
     # Submit with custom GPU count and partition
     sst-train --config_path ... --n_gpus 4 --partition h200-reserved-default
@@ -16,8 +16,8 @@ Usage:
     # Pass additional arguments to train.py
     sst-train --config_path ... --num_iterations 1000 --learning_rate 5e-5
 
-    # Alternative: run the script directly
-    python scripts/deploy.py --config_path simple_stories_train/configs/pile_llama_simple_mlp_4L_wide.yaml
+    # Alternative: run the module directly
+    python -m simple_stories_train.deploy_train --config_path simple_stories_train/configs/pile_llama_simple_mlp_4L.yaml
 """
 
 import argparse
@@ -134,8 +134,8 @@ def main() -> None:
     parser.add_argument(
         "--n_gpus",
         type=int,
-        default=None,
-        help="Number of GPUs to use (default: 8 for SLURM, 1 for local)",
+        default=1,
+        help="Number of GPUs to use (default: 1)",
     )
     parser.add_argument(
         "--partition",
@@ -172,21 +172,16 @@ def main() -> None:
     # Default job name from config file
     job_name = args.job_name or "spd-sst-train"
 
-    # Set default n_gpus based on mode
-    n_gpus = args.n_gpus
-    if n_gpus is None:
-        n_gpus = 1 if args.local else 8
-
     if args.local:
         run_local(
             config_path=args.config_path,
-            n_gpus=n_gpus,
+            n_gpus=args.n_gpus,
             extra_args=extra_args,
         )
     else:
         submit_slurm(
             config_path=args.config_path,
-            n_gpus=n_gpus,
+            n_gpus=args.n_gpus,
             partition=args.partition,
             time_limit=args.time,
             job_name=job_name,

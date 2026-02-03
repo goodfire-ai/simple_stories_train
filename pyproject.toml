@@ -33,11 +33,11 @@ requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project.scripts]
-sst-train = "scripts.deploy:main"
+sst-train = "simple_stories_train.deploy_train:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["simple_stories_train*", "scripts"]
+include = ["simple_stories_train*"]
 
 
 [tool.ruff]
