@@ -72,6 +72,7 @@ known-third-party = ["wandb"]
 
 [tool.pyright]
 include = ["simple_stories_train", "tests"]
+exclude = ["build", "dist"]
 
 strictListInference = true
 strictDictionaryInference = true
