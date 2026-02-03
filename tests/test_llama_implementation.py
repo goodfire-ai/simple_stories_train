@@ -119,6 +119,7 @@ def test_local_pt_model_loading() -> None:
 
 def test_generation_with_eos_token_id() -> None:
     """Test the generate method with EOS token for both single and batched sequences"""
+    torch.manual_seed(42)
     config = LlamaConfig(
         model_type="Llama",
         block_size=128,

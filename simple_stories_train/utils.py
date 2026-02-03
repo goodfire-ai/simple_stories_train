@@ -21,8 +21,8 @@ def print0(*args: Any, **kwargs: Any) -> None:
 def is_checkpoint_step(step: int) -> bool:
     # step & (step - 1) == 0 iff step is a power of 2. Therefore, the following
     # expression will be true iff step is a power of two between 0 and 1000
-    # or step is a multiple of 50000.
-    return (0 < step < 1000 and (step & (step - 1)) == 0) or step % 50000 == 0
+    # or step is a multiple of 1000.
+    return (0 < step < 1000 and (step & (step - 1)) == 0) or step % 1000 == 0
 
 
 def save_configs(
