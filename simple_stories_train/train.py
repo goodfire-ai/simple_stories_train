@@ -50,7 +50,7 @@ from simple_stories_train.ln_free import (
 )
 from simple_stories_train.models import MODEL_CLASSES, ModelConfig
 from simple_stories_train.run_info import RunInfo
-from simple_stories_train.settings import REPO_ROOT
+from simple_stories_train.settings import TRAIN_OUT_DIR
 from simple_stories_train.utils import (
     is_checkpoint_step,
     load_config,
@@ -93,7 +93,7 @@ class Config(BaseConfig):
         description="Dataset config for validation",
     )
     output_dir: Path = Field(
-        REPO_ROOT / "out", description="Directory to write logs and checkpoints"
+        TRAIN_OUT_DIR / "out", description="Directory to write logs and checkpoints"
     )
     # Model configuration (discriminated union)
     model: ModelConfig = Field(..., description="Model configuration")
